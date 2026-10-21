@@ -3062,6 +3062,11 @@ void loadApp(uint8_t slot, uint8_t app) {
   busCur[slot] = Signal{};
   busCur[slot].scale = c.scale;
   busCur[slot].root = c.root;
+  // Источник в покое обязан означать «не трогай». У двустороннего
+  // модуля покой это середина, и без этой строчки до его первого
+  // срабатывания ccValue был нулём — то есть полным отклонением вниз,
+  // и всё привязанное прижималось к низу диапазона.
+  busCur[slot].ccValue = isModBipolar(app) ? 64 : 0;
   markEdited();
 }
 
@@ -4468,6 +4473,7 @@ void loadSettings() {
         c.modDepth[i] = (int8_t)clampInt(c.modDepth[i], -lim, lim);
       }
     }
+    busCur[s].ccValue = isModBipolar(c.app) ? 64 : 0;   // покой источника
     c.rate = (uint8_t)clampInt(c.rate, 0, 4);
     c.scale = (uint8_t)clampInt(c.scale, 0, 9);
     c.root = (uint8_t)clampInt(c.root, 0, 11);
