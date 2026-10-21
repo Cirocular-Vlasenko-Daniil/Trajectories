@@ -391,6 +391,10 @@ PDesc processorSubDesc(uint8_t app, uint8_t col) {
     if ((AppId)app == AppId::KEYTRK) return {"CENTR", 0, 127, P_NOTE, nullptr};
     // Верхняя зона сплита — свой канал, CC DEST модулю не нужен.
     if ((AppId)app == AppId::POLYSPL) return {"CH HI", 0, 16, P_CHAN, nullptr};
+    // ARP наружу CC не слал никогда: колонка CCDST существовала, её
+    // можно было крутить, и она ничего не делала. Пустое имя честнее —
+    // колонка не рисуется и в слой модуляции не попадает.
+    if ((AppId)app == AppId::ARP) return {"", 0, 0, P_NUM, nullptr};
   }
   if (col == 0) {
     // Нижняя зона сплита и базовый канал RROBIN живут там же, где
@@ -712,10 +716,17 @@ struct SlotRt {
   // RROBIN: когда освободится каждый голос и чей ход при CYCLE.
   uint32_t voiceFreeAt[4];
   uint8_t  rrNext;
-  // ARP: опора кейтрекинга — первая увиденная нота. От неё считается,
-  // насколько арпеджио двигается вслед за клавишей.
+  // ARP: опора кейтрекинга — нижняя нота ПРЕДЫДУЩЕГО аккорда. От неё
+  // считается, насколько арпеджио двигается вслед за новой клавишей.
+  // Раньше опора училась с первой увиденной ноты и жила до перезагрузки
+  // модуля: что бы ты ни играл дальше, арпеджио тянуло к той самой
+  // случайной ноте, и причину было не видно.
   uint8_t  arpAnchor;
+  uint8_t  arpPrevLow;     // низ текущего аккорда — опора для следующего
   bool     arpAnchorSet;
+  // До какого момента арпеджио имеет право играть: аккорд отпущен —
+  // арпеджио молчит. Отсчитывается от гейта пришедшего сигнала.
+  uint32_t arpUntilMs;
   // LOGIC
   uint32_t lastGridStep;   // тик последнего шага слота-сетки
   bool     sawA, sawB;     // источник выдал ноту с прошлой проверки
@@ -1762,7 +1773,19 @@ void onCapture(uint8_t slot) {
       r.arpPoolLen = buildPool(r, (uint8_t)clampInt(modP(slot, 2), 0, 3),
                                r.arpPool, sizeof(r.arpPool), r.arpVel);
       r.arpIndex = 0;
-      if (!r.arpAnchorSet) { r.arpAnchor = lowestOf(r); r.arpAnchorSet = true; }
+      {
+        // Опора обновляется от входящего сигнала, но на шаг позади:
+        // пока играет этот аккорд, опора держит низ предыдущего. Иначе
+        // опора совпадала бы с текущей нотой и KTRC не значил бы
+        // ничего.
+        uint8_t low = lowestOf(r);
+        r.arpAnchor = r.arpAnchorSet ? r.arpPrevLow : low;
+        r.arpPrevLow = low;
+        r.arpAnchorSet = true;
+      }
+      // Аккорд отпущен — арпеджио останавливается. Длина нажатия это
+      // гейт пришедшего сигнала: держишь дольше — играет дольше.
+      r.arpUntilMs = millis() + r.capGateMs;
       // Своей свободной сетки у ARP больше нет: отсчёт начинается от
       // пришедшей ноты, а RATE задаёт скорость самого арпеджио. Первый
       // шаг звучит сразу, поэтому нажатая клавиша слышна без задержки.
@@ -2300,6 +2323,10 @@ void fireArpStep(uint8_t slot) {
   SlotCfg &c = cfg[slot];
   SlotRt &r = rt[slot];
   if (r.arpPoolLen == 0) return;
+  // Аккорд отпущен — пул гасим. Раньше арпеджио шло, пока в нём есть
+  // хоть одна нота, то есть до следующего аккорда или до выгрузки
+  // модуля: остановить его было нечем.
+  if ((int32_t)(millis() - r.arpUntilMs) >= 0) { r.arpPoolLen = 0; return; }
   uint8_t idx = (uint8_t)(r.arpIndex % r.arpPoolLen);
   uint8_t note = r.arpPool[idx];
   uint8_t vel = r.arpVel[idx];
@@ -2312,7 +2339,16 @@ void fireArpStep(uint8_t slot) {
     int v = (int)r.arpAnchor + ((int)note - (int)r.arpAnchor) * ktrc / 64;
     note = quantizeToScale((uint8_t)clampInt(v, 0, 127), r.capScale, r.capRoot);
   }
-  uint32_t gate = 10 + (uint32_t)clampInt(modP(slot, 3), 0, 127) * 190 / 127;
+  // STUTT — ПАУЗА внутри арпеджио, а не длина ноты. 0 это легато:
+  // нота тянется до следующего шага. Чем больше STUTT, тем короче
+  // нота и тем слышнее промежуток. Раньше параметр был длиной, и
+  // «паузы внутри арпеджио» задавались выкручиванием его к нулю —
+  // то есть ровно наоборот тому, что написано на экране.
+  uint32_t stepMs = (uint32_t)rateTicks[clampInt(modP(slot, 0), 0, 4)] * 60000UL
+                    / ((uint32_t)state.bpm * 24UL);
+  if (stepMs < 20) stepMs = 20;
+  uint32_t pause = stepMs * (uint32_t)clampInt(modP(slot, 3), 0, 127) / 160;
+  uint32_t gate = (stepMs > pause + 10) ? (stepMs - pause) : 10;
   scheduleNote(note, vel, c.midiCh, 0, gate);
   uint8_t one[1] = {note};
   uint8_t ov[1] = {vel};
@@ -4062,10 +4098,14 @@ void drawSlotPage() {
       // Сверху общий BPM (TAP), снизу деление такта этого слота.
       sprintf(label, "%d", state.bpm);
       strcpy(val, rateNames[clampInt(modRate(state.currentSlot), 0, 4)]);
-    } else if (state.subPage && isGenerator(c.app) && i == 2) {
+    } else if (state.subPage && isGenerator(c.app) && i == 2 &&
+               (AppId)c.app != AppId::TOPOLOGY) {
       // Колонка SCALE занимает обе строки: сверху вместо подписи
       // тоника (C-B), снизу сам лад. Подпись «SCALE» не нужна —
       // содержимое говорит само за себя.
+      // TOPOLOGY сюда не попадает: у неё в этой колонке MODE, и ветка
+      // рисовала поверх него лад — на экране стояло «C / MAJ», которое
+      // не менялось, а энкодер молча переключал 1CH/3CH. Колонка врала.
       strcpy(label, rootNames[modRoot(state.currentSlot) % 12]);
       strcpy(val, scales[clampInt(modScale(state.currentSlot), 0, 9)].name);
     } else if (state.subPage && isProcessor(c.app) && i == 1) {
