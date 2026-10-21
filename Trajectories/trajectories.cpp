@@ -1154,6 +1154,16 @@ void emitCC(uint8_t slot, uint8_t cc, uint8_t val) {
   // На шину значение кладём всегда: с каналом NO модуль перестаёт слать
   // MIDI, но остаётся источником для тех, кто на него армлен.
   if (cfg[slot].midiCh) sendCCRaw(cfg[slot].midiCh, cc, val);
+}
+
+// Что слот отдаёт НА ШИНУ как модуляцию. Отдельно от emitCC намеренно:
+// пока шину писал каждый отправленный CC, источником становился
+// последний записанный, и у модуля с несколькими адресами это было
+// не предсказать. ENVELOPE отдавал свою инверсию, KEYTRACK — ту линию,
+// которая оказалась последней включённой.
+// Правило: на шину идёт сигнал модуля ДО преобразования глубины.
+// CC-выходы несут отмасштабированные значения, шина — исходный сигнал.
+void publishMod(uint8_t slot, uint8_t val) {
   busCur[slot].ccValue = val;
 }
 
@@ -1881,6 +1891,7 @@ void onCapture(uint8_t slot) {
           uint8_t v = (i & 1) ? (uint8_t)clampInt(64 + pp, 0, 127)
                               : (uint8_t)clampInt(64 - pp, 0, 127);
           emitCC(slot, c.ccDest, v);
+          publishMod(slot, v);
         }
       }
       break;
@@ -2045,6 +2056,10 @@ void onCapture(uint8_t slot) {
       // опора и размах читались напрямую и модуляции не подчинялись.
       int center = clampInt(modParam(slot, true, 2), 0, 127);
       int span = clampInt(modParam(slot, true, 3), 1, 48);
+      // На шину — сам отслеженный сигнал: нота относительно опоры,
+      // развёрнутая на размах, без глубины какой-либо линии. Линии
+      // задают влияние на свои CC-дестинейшены и шину не трогают.
+      publishMod(slot, (uint8_t)clampInt(64 + ((int)note - center) * 64 / span, 0, 127));
       for (uint8_t i = 0; i < NUM_COLS; i++) {
         int depth = clampInt(modP(slot, i), -64, 64);
         if (depth == 0) continue;                 // линия выключена
@@ -2155,22 +2170,16 @@ void serviceProcessor(uint8_t slot) {
         v = (t < peak) ? envShapeCurve(t / peak, func)
                        : envShapeCurve((1 - t) / (1 - peak), func);
       uint8_t v1 = (uint8_t)clampInt((int)(v * 127), 0, 127);
-      // В LOOP CC2 опережает CC1 на четверть цикла; в одноразовых
-      // формах CC2 — дополнение CC1.
-      uint8_t v2;
-      if (shape == 2) {
-        float t2 = t + 0.25f; if (t2 > 1) t2 -= 1;
-        float w = (t2 < peak) ? envShapeCurve(t2 / peak, func)
-                              : envShapeCurve((1 - t2) / (1 - peak), func);
-        v2 = (uint8_t)clampInt((int)(w * 127), 0, 127);
-      } else {
-        v2 = 127 - v1;
-      }
+      // Оба адреса несут ОДНО значение: колонки CC1 и CC2 задают
+      // только номера. Зеркало было вредным — как источник модуляции
+      // модуль отдавал свою же инверсию, потому что шину писал
+      // последний отправленный CC.
       static uint32_t lastCCMs[NUM_SLOTS] = {0};
       if (now - lastCCMs[slot] >= 15) {
         lastCCMs[slot] = now;
         emitCC(slot, (uint8_t)clampInt(modP(slot, 2), 0, 127), v1);
-        emitCC(slot, (uint8_t)clampInt(modP(slot, 3), 0, 127), v2);
+        emitCC(slot, (uint8_t)clampInt(modP(slot, 3), 0, 127), v1);
+        publishMod(slot, v1);
       }
       break;
     }
@@ -2203,6 +2212,9 @@ void serviceProcessor(uint8_t slot) {
       int amt = clampInt(modP(slot, 3), 0, 127);
       uint8_t v = (uint8_t)clampInt(64 + (int)(out * 63.0f * amt / 127.0f), 0, 127);
       emitCC(slot, c.ccDest, v);
+      // На шину — волна до AMT: иначе глубина наружу незаметно меняла
+      // силу модуляции в чужом слоте.
+      publishMod(slot, (uint8_t)clampInt(64 + (int)(out * 63.0f), 0, 127));
       break;
     }
 
@@ -2212,7 +2224,6 @@ void serviceProcessor(uint8_t slot) {
       r.dustLastMs = now;
       int fill = clampInt(modP(slot, 0), 0, 127);
       if (fill == 0) break;
-      emitCC(slot, c.ccDest, (uint8_t)fill);
       if (random(0, 128) >= fill) break;
       // Корень медленно дрейфует синусоидой — облако не стоит на месте.
       r.dustDrift += 0.01f;
@@ -2232,6 +2243,12 @@ void serviceProcessor(uint8_t slot) {
       // иначе цепочка за DUST обрывается.
       uint8_t one[1] = {note};
       publish(slot, one, 1, len, r.capScale, r.capRoot);
+      // Как источник модуляции DUST отдаёт выпавшую ЧАСТИЦУ, а не свой
+      // же параметр FILL: у источника должно быть видно происходящее, а
+      // не то, что и так стоит на экране. Нота переводится в CC как
+      // есть — номер ноты и номер контроллера живут в одном диапазоне.
+      emitCC(slot, c.ccDest, note);
+      publishMod(slot, note);
       break;
     }
 
