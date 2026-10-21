@@ -60,7 +60,7 @@ enum class AppId : uint8_t {
   // Генераторы — сами производят ноты, входа не имеют.
   BASIC, SKELETON, EUCLIDIAN, TOPOLOGY,
   // Процессоры — трансформируют захваченный по ARM сигнал.
-  ARP, STRUM, NDELAY, ENV, MLFO, DUST, GLIDER, ADD, SHIFT, LOGIC, MATH, KEYTRK,
+  ARP, STRUM, NDELAY, ENV, MLFO, DUST, GLIDER, ADD, LOGIC, KEYTRK,
   MULTX, POLYSPL, RROBIN,
   COUNT
 };
@@ -79,12 +79,11 @@ const uint8_t browseOrder[APP_COUNT] = {
   (uint8_t)AppId::EUCLIDIAN, (uint8_t)AppId::TOPOLOGY,
   // NOTE — преобразуют захваченные ноты
   (uint8_t)AppId::ARP, (uint8_t)AppId::STRUM, (uint8_t)AppId::NDELAY,
-  (uint8_t)AppId::GLIDER, (uint8_t)AppId::ADD, (uint8_t)AppId::SHIFT,
-  (uint8_t)AppId::DUST,
+  (uint8_t)AppId::GLIDER, (uint8_t)AppId::ADD, (uint8_t)AppId::DUST,
   // CC — производят модуляцию наружу
   (uint8_t)AppId::ENV, (uint8_t)AppId::MLFO, (uint8_t)AppId::KEYTRK,
   // UTIL — считают и управляют самим устройством
-  (uint8_t)AppId::LOGIC, (uint8_t)AppId::MATH,
+  (uint8_t)AppId::LOGIC,
   // ROUTE — раскладывают сигнал по каналам
   (uint8_t)AppId::MULTX, (uint8_t)AppId::POLYSPL, (uint8_t)AppId::RROBIN
 };
@@ -92,7 +91,7 @@ const uint8_t browseOrder[APP_COUNT] = {
 const char* const groupNames[] = {"EMPTY", "GEN", "NOTE", "CC", "UTIL", "ROUTE"};
 constexpr uint8_t GROUP_COUNT = 6;
 // Границы групп в browseOrder: начало каждой плюс конец списка.
-const uint8_t groupStart[GROUP_COUNT + 1] = {0, 1, 5, 12, 15, 17, APP_COUNT};
+const uint8_t groupStart[GROUP_COUNT + 1] = {0, 1, 5, 11, 14, 15, APP_COUNT};
 
 uint8_t groupOfPos(uint8_t pos) {
   for (uint8_t g = 0; g < GROUP_COUNT; g++)
@@ -151,20 +150,12 @@ const char* const lfoAct[]      = {"FREE", "SYNC", "ONE"};
 const char* const glideCurve[]  = {"LIN", "SPRG", "EASE"};
 const char* const addIntv[]     = {"3rd", "5th", "6th", "7th", "OCT"};
 const char* const addSrc[]      = {"LOW", "HIGH", "LAST"};
-// SHIFT: что делать с ячейкой, вышедшей из конца регистра.
-// Режим задаёт, ВО ЧТО превращается ячейка под головой записи, когда
-// свежий материал в неё не попал. SPRD задаёт величину — в тех
-// единицах, которые подразумевает режим.
-const char* const shiftMode[]   = {"WALK", "OCT", "MIRROR", "DROP"};
 const char* const logicOps[]    = {"AND", "OR", "XOR", "NAND", "NOR", "XNOR"};
 const char* const logicCmp[]    = {"TRIG", "T+N", "T+CC"};
 const char* const logicRel[]    = {"=", "!=", ">", "<"};
 const char* const logicOut[]    = {"A", "B", "LOW", "HIGH"};
-const char* const mathSrc[]     = {"NOTE", "CC", "GATE"};
 // B-A — обратное вычитание. Без него нечем инвертировать сигнал:
 // "-" даёт только A-B, а типовая утилита — это константа минус вход.
-const char* const mathOps[]     = {"+", "-", "B-A", "x", "/", "AVG", "MOD", "MIN", "MAX"};
-const char* const mathLim[]     = {"CLAMP", "WRAP", "FOLD"};
 // KEYTRACK: подписи колонок нужны только для дескриптора — на экране
 // вместо них стоит номер CC каждой линии.
 const char* const ktLines[]     = {"L1", "L2", "L3", "L4"};
@@ -300,34 +291,12 @@ const AppDesc apps[APP_COUNT] = {
   // LOGIC сравнивает два входа и пропускает ноту, только когда
   // выполняется логическое уравнение. Сетку берёт извне — см.
   // logicGridSlot(), собственного RATE у него нет.
-  // SHIFT — регистр сдвига. Единственный модуль, который ПОМНИТ: держит
-  // очередь прошедших нот и на каждый триггер выдаёт её по кругу. При
-  // нулевом шансе это чистая петля, при полном — сплошная случайность,
-  // между ними — то самое «повторяется, но медленно уползает», чего в
-  // устройстве больше нет ни у кого.
-  // Первая колонка рисует сам регистр, поэтому её подпись на экран не
-  // выходит; ROT живёт под TAP на ней же и хранится в sub4.
-  {"SHIFT", {{"LEN",   1, 16,  P_NUM,  nullptr},
-             {"MUTAT", 0, 127, P_NUM,  nullptr},
-             {"SPRD",  0, 7,   P_NUM,  nullptr},
-             {"MODE",  0, 3,   P_LIST, shiftMode}},
-            {"ROT",   0, 15,  P_NUM,  nullptr}},
-
   {"LOGIC", {{"OP",    0, 5,   P_LIST, logicOps},
              {"CMP",   0, 2,   P_LIST, logicCmp},
              {"REL",   0, 3,   P_LIST, logicRel},
              {"OUT",   0, 3,   P_LIST, logicOut}},
             // На подстранице не рисуется: тут образец для сравнения CC.
             {"CCVAL", 0, 127, P_NUM, nullptr}},
-
-  // MATH — арифметика над сигналами. В отличие от LOGIC не решает,
-  // пропускать ли, а считает, каким будет значение. Сетка не нужна:
-  // в тишине считать нечего.
-  {"MATH",  {{"SRC",   0, 2,   P_LIST, mathSrc},
-             {"OP",    0, 8,   P_LIST, mathOps},
-             {"CONST", 0, 127, P_NUM,  nullptr},
-             {"LIM",   0, 2,   P_LIST, mathLim}},
-            {"", 0, 0, P_NUM, nullptr}},
 
   // KEYTRACK — высота захваченной ноты рулит четырьмя линиями CC.
   // Каждая колонка это одна линия: сверху её номер CC (TAP + энкодер),
@@ -430,14 +399,10 @@ PDesc processorSubDesc(uint8_t app, uint8_t col) {
   // CCDST, но ccDest этот модуль не использует вовсе: номера CC у
   // него свои, по одному на линию.
   if (col == 2 && (AppId)app == AppId::KEYTRK) return {"CNTR", 0, 127, P_NOTE, nullptr};
-  // SHIFT не шлёт CC, поэтому CCDST у него мертва — колонка отдана
-  // приращению velocity за круг: петля затухает или раскачивается.
-  if (col == 2 && (AppId)app == AppId::SHIFT) return {"VEL", -64, 64, P_SIGN, nullptr};
   return procSub[col];
 }
 inline bool usesSub2(uint8_t app) {
-  return (AppId)app == AppId::SHIFT ||
-         (AppId)app == AppId::STRUM || (AppId)app == AppId::ENV ||
+  return (AppId)app == AppId::STRUM || (AppId)app == AppId::ENV ||
          (AppId)app == AppId::KEYTRK || (AppId)app == AppId::POLYSPL;
 }
 inline bool usesSub3(uint8_t app) {
@@ -552,7 +517,7 @@ int degreeOf(uint8_t note, uint8_t sc, uint8_t root) {
 
 // Без сворачивания в диапазон MIDI: результат может выйти за 0..127,
 // и решать, что с этим делать, должен вызывающий — иначе параметр LIM
-// у MATH оказался бы мёртвым, всё сворачивалось бы здесь.
+// оказался бы мёртвым, всё сворачивалось бы здесь.
 int noteOfDegreeRaw(int deg, uint8_t sc, uint8_t root) {
   if (sc >= 10) sc = 0;
   const ScaleDef &s = scales[sc];
@@ -670,7 +635,7 @@ inline uint8_t extModCC(uint8_t slot, uint8_t idx) {
 inline bool isModSource(uint8_t app) {
   switch ((AppId)app) {
     case AppId::MLFO: case AppId::ENV: case AppId::KEYTRK:
-    case AppId::MATH: case AppId::DUST: case AppId::NDELAY: return true;
+    case AppId::DUST: case AppId::NDELAY: return true;
     default: return false;
   }
 }
@@ -730,12 +695,6 @@ struct SlotRt {
   // RROBIN: когда освободится каждый голос и чей ход при CYCLE.
   uint32_t voiceFreeAt[4];
   uint8_t  rrNext;
-  // SHIFT: сам регистр. Ноты и их силы едут по кругу.
-  uint8_t  shReg[16];
-  uint8_t  shVel[16];
-  uint16_t shRest;        // биты ячеек, ставших паузой в режиме DROP
-  uint8_t  shPos;
-  uint8_t  shFilled;      // сколько ячеек уже набралось со входа
   // ARP: опора кейтрекинга — первая увиденная нота. От неё считается,
   // насколько арпеджио двигается вслед за клавишей.
   uint8_t  arpAnchor;
@@ -779,7 +738,7 @@ constexpr uint8_t MP_BPM   [[maybe_unused]] = 9;
 constexpr uint8_t MP_EXTRA = 11;
 // Вторая строка ПЕРВОЙ колонки главной страницы. У генератора sub4 —
 // это четвёртая колонка подстраницы (MP_SUB+3), а у процессора совсем
-// другой параметр: ROT у SHIFT, деление у NOTE DELAY, образец CC у
+// другой параметр: деление у NOTE DELAY, образец CC у
 // LOGIC. Один индекс на двоих означал бы, что модуляция STEP+ заодно
 // двигает ROT.
 constexpr uint8_t MP_TOPO_Y = MP_EXTRA + 3;   // Y карты TOPOLOGY
@@ -1651,21 +1610,6 @@ float envShapeCurve(float x, uint8_t func) {
   }
 }
 
-// Арифметика MATH. Деление и остаток на нуле пропускают A без
-// изменений — глушить шаг тут было бы хуже, чем ничего не сделать.
-int mathApply(uint8_t op, int a, int b) {
-  switch (op) {
-    case 0:  return a + b;
-    case 1:  return a - b;
-    case 2:  return b - a;
-    case 3:  return a * b;
-    case 4:  return b ? a / b : a;
-    case 5:  return (a + b) / 2;
-    case 6:  return b ? a % b : a;
-    case 7:  return a < b ? a : b;
-    default: return a > b ? a : b;
-  }
-}
 
 // Что делать с результатом, вышедшим за диапазон.
 int applyLim(int v, int lo, int hi, uint8_t lim) {
@@ -2043,161 +1987,7 @@ void onCapture(uint8_t slot) {
       break;
     }
 
-    case AppId::MATH: {
-      uint8_t src = (uint8_t)clampInt(modP(slot, 0), 0, 2);
-      if (src == 1) break;                 // CC считается непрерывно, не по событию
-      const Signal* sa = armSource(slot, 0);
-      const Signal* sb = armSource(slot, 1);
-      if (!sa || !sa->count) break;
-      uint8_t op = (uint8_t)clampInt(modP(slot, 1), 0, 8);
-      uint8_t lim = (uint8_t)clampInt(modP(slot, 3), 0, 2);
-      bool hasB = sb && sb->count;
 
-      if (src == 0) {
-        // Складывать MIDI-номера бессмысленно, поэтому считаем СТУПЕНИ
-        // внутри октавы: у A берём его позицию, у B — его ступень как
-        // интервал. Октава A при этом сохраняется, а перелив за её
-        // край естественно уходит в соседнюю.
-        const ScaleDef &sA = scales[clampInt(sa->scale, 0, 9)];
-        int degA = degreeOf(sa->notes[0], sa->scale, sa->root);
-        int octA = floorDiv(degA, sA.count);
-        int posA = degA - octA * sA.count;
-        int posB;
-        if (hasB) {
-          const ScaleDef &sB = scales[clampInt(sb->scale, 0, 9)];
-          int degB = degreeOf(sb->notes[0], sb->scale, sb->root);
-          posB = degB - floorDiv(degB, sB.count) * sB.count;
-        } else {
-          posB = clampInt(modP(slot, 2), 0, 24);
-        }
-        int raw = noteOfDegreeRaw(octA * sA.count + mathApply(op, posA, posB),
-                                  sa->scale, sa->root);
-        // LIM решает судьбу вылета за MIDI-диапазон, а квантование
-        // после него возвращает результат в лад: WRAP и FOLD считают
-        // в полутонах и сами по себе из лада выбрасывают.
-        uint8_t note = quantizeToScale(applyLim(raw, 0, 127, lim), sa->scale, sa->root);
-        if (c.stepPlus) note = transposeDegrees(note, c.stepPlus, sa->scale, sa->root);
-        uint32_t gate = r.capGateMs ? r.capGateMs : 120;
-        scheduleNote(note, r.capVel[0], c.midiCh, 0, gate);
-        uint8_t one[1] = {note};
-        uint8_t ov[1] = {r.capVel[0]};
-        publish(slot, one, 1, gate, sa->scale, sa->root, ov);
-      } else {
-        // GATE: нота проходит насквозь, меняется только её длина.
-        int a = (int)(sa->gateMs ? sa->gateMs : 120);
-        int res;
-        if (op == 3 || op == 4) {
-          // Перемножать две длительности бессмысленно, поэтому множитель
-          // здесь всегда из CONST, в шестнадцатых долях: 16 — это x1.
-          int f = clampInt(modP(slot, 2), 1, 127);
-          res = (op == 3) ? (a * f / 16) : (a * 16 / f);
-        } else {
-          int b = hasB ? (int)sb->gateMs : clampInt(modP(slot, 2), 0, 127) * 8;
-          res = mathApply(op, a, b);
-        }
-        res = applyLim(res, 10, 4000, lim);
-        uint8_t note = sa->notes[0];
-        if (c.stepPlus) note = transposeDegrees(note, c.stepPlus, sa->scale, sa->root);
-        scheduleNote(note, r.capVel[0], c.midiCh, 0, (uint32_t)res);
-        uint8_t one[1] = {note};
-        uint8_t ov[1] = {r.capVel[0]};
-        publish(slot, one, 1, (uint32_t)res, sa->scale, sa->root, ov);
-      }
-      break;
-    }
-
-    case AppId::SHIFT: {
-      if (r.capCount == 0) break;
-      uint8_t len  = (uint8_t)clampInt(modP(slot, 0), 1, 16);
-      int     mut  = clampInt(modP(slot, 1), 0, 127);
-      int     sprd = clampInt(modP(slot, 2), 0, 7);
-      uint8_t mode = (uint8_t)clampInt(modP(slot, 3), 0, 3);
-      int     rot  = clampInt(modSub4(slot), 0, 15) % len;
-      int     velD = clampInt(cfg[slot].sub2, -32, 32);
-
-      // Пока регистр не набрал свои LEN событий, вход идёт насквозь и
-      // попутно заполняет ячейки по порядку. Так слышно, что играешь, а
-      // закольцовываться оно начинает ровно тогда, когда есть чему.
-      if (r.shFilled < len) {
-        uint8_t idx = r.shFilled;
-        r.shReg[idx] = r.capNotes[0];
-        r.shVel[idx] = r.capVel[0];
-        r.shRest &= (uint16_t)~(1u << idx);
-        r.shFilled++;
-        uint32_t g = r.capGateMs ? r.capGateMs : 120;
-        scheduleNote(r.capNotes[0], r.capVel[0], c.midiCh, 0, g);
-        uint8_t n1[1] = {r.capNotes[0]};
-        uint8_t v1[1] = {r.capVel[0]};
-        publish(slot, n1, 1, g, r.capScale, r.capRoot, v1);
-        break;
-      }
-
-      uint8_t rd = (uint8_t)(r.shPos % len);
-      // Голова записи отстоит от головы чтения на ROT. Точка записи
-      // всегда на одном и том же расстоянии от того, что слышно, —
-      // поэтому мутация копится связно, а не разбрасывается по регистру.
-      uint8_t wr = (uint8_t)((rd + rot) % len);
-
-      // Снимаем то, что прозвучит, ДО записи: при ROT=0 головы совпадают,
-      // и иначе свежий материал перебивал бы ноту в тот же миг, вместо
-      // того чтобы дождаться своего круга.
-      bool    rest = (r.shRest >> rd) & 1;
-      uint8_t note = r.shReg[rd];
-      uint8_t vel  = r.shVel[rd];
-
-      // За событие с ячейкой под головой записи происходит РОВНО ОДНО:
-      // либо в неё садится свежий материал, либо она портится сама.
-      if (mut && (int)random(0, 128) < mut) {
-        r.shReg[wr] = r.capNotes[0];
-        r.shVel[wr] = r.capVel[0];
-        r.shRest &= (uint16_t)~(1u << wr);
-      } else if (sprd) {
-        int v = r.shReg[wr];
-        switch (mode) {
-          case 0:   // WALK — блуждание по ступеням лада
-            v = transposeDegrees((uint8_t)v, (int)random(-sprd, sprd + 1),
-                                 r.capScale, r.capRoot);
-            break;
-          case 1: { // OCT — октавный разброс в полосе вокруг среднего
-            int sum = 0;
-            for (uint8_t i = 0; i < len; i++) sum += r.shReg[i];
-            int mid = sum / len, band = 12 * sprd;
-            v += random(0, 2) ? 12 : -12;
-            while (v > mid + band) v -= 12;
-            while (v < mid - band) v += 12;
-            v = clampInt(v, 0, 127);
-            break;
-          }
-          case 2: { // MIRROR — доля пути к отражению вокруг среднего
-            int sum = 0;
-            for (uint8_t i = 0; i < len; i++) sum += r.shReg[i];
-            int mid = sum / len;
-            int mirrored = 2 * mid - v;
-            v = v + (mirrored - v) * sprd / 7;
-            v = quantizeToScale(clampInt(v, 0, 127), r.capScale, r.capRoot);
-            break;
-          }
-          default:  // DROP — портится не высота, а ритм
-            if ((int)random(0, 14) < sprd) r.shRest |= (uint16_t)(1u << wr);
-            else                           r.shRest &= (uint16_t)~(1u << wr);
-            break;
-        }
-        if (mode != 3) r.shReg[wr] = (uint8_t)clampInt(v, 0, 127);
-      }
-
-      // Приращение velocity срабатывает на ячейке при чтении, то есть
-      // ровно раз за круг: петля затухает как плёнка или раскачивается.
-      if (velD) r.shVel[rd] = (uint8_t)clampInt((int)vel + velD, 1, 127);
-      r.shPos = (uint8_t)((rd + 1) % len);
-      if (rest) break;
-
-      uint32_t gate = r.capGateMs ? r.capGateMs : 120;
-      scheduleNote(note, vel, c.midiCh, 0, gate);
-      uint8_t one[1] = {note};
-      uint8_t ov[1] = {vel};
-      publish(slot, one, 1, gate, r.capScale, r.capRoot, ov);
-      break;
-    }
 
     case AppId::ADD: {
       uint8_t src;
@@ -2368,24 +2158,6 @@ void serviceProcessor(uint8_t slot) {
       break;
     }
 
-    case AppId::MATH: {
-      // Непрерывным тут является только режим CC: источником может быть
-      // ползущий LFO, ждать от него «событие» бессмысленно. NOTE и GATE
-      // считаются по приходу ноты, в onCapture().
-      if (clampInt(modP(slot, 0), 0, 2) != 1) break;
-      static uint32_t lastMathMs[NUM_SLOTS] = {0};
-      if (now - lastMathMs[slot] < 15) break;
-      lastMathMs[slot] = now;
-      const Signal* sa = armSource(slot, 0);
-      const Signal* sb = armSource(slot, 1);
-      int a = sa ? (int)sa->ccValue : 0;
-      int b = sb ? (int)sb->ccValue : clampInt(modP(slot, 2), 0, 127);
-      int res = mathApply((uint8_t)clampInt(modP(slot, 1), 0, 8), a, b);
-      res = applyLim(res, 0, 127, (uint8_t)clampInt(modP(slot, 3), 0, 2));
-      emitCC(slot, c.ccDest, (uint8_t)res);
-      r.lastFireMs = now;
-      break;
-    }
 
     case AppId::LOGIC: {
       // Сетка приходит извне: шаги генератора в начале цепочки, а если
@@ -2506,7 +2278,7 @@ void serviceSlots() {
   // У внешнего входа своего лада нет — берём его у первого генератора
   // на устройстве. Без этого всё, что приходит с клавиатуры, цепочка
   // считала бы до мажором: GLIDER скользил бы по чужому ладу, ADD
-  // строил терцию не от того корня, MATH неверно считал ступени.
+  // строил терцию не от того корня.
   {
     int8_t ref = -1;
     for (uint8_t s = 0; s < NUM_SLOTS && ref < 0; s++)
@@ -2982,10 +2754,6 @@ void loadApp(uint8_t slot, uint8_t app) {
     case AppId::DUST:
       c.p[0] = 32;                          // FILL — иначе ни одной частицы
       break;
-    case AppId::SHIFT:
-      c.p[0] = 8;                           // LEN — петля в 8 событий
-      c.p[1] = 20;                          // MUTAT — тихо подменяется
-      break;
     case AppId::ADD:
       c.p[3] = 100;                         // VEL — иначе добавленная нота беззвучна
       break;
@@ -2997,9 +2765,6 @@ void loadApp(uint8_t slot, uint8_t app) {
       // свежезагруженный модуль просто обрывал цепочку. OR пропускает
       // A насквозь, пока второй вход не назначен.
       c.p[0] = 1;
-      break;
-    case AppId::MATH:
-      c.p[2] = 4;                           // CONST — сразу слышимый интервал
       break;
     case AppId::NDELAY:
       c.p[0] = 3;                           // сама нота и два эха
@@ -3377,16 +3142,6 @@ void handleEncoder() {
     markEdited();
     return;
   }
-  // У SHIFT под TAP на первой колонке лежит ROT — расстояние от головы
-  // чтения до головы записи. Верхний предел ходит за LEN: писать дальше
-  // собственной петли бессмысленно.
-  if (!state.subPage && (AppId)c.app == AppId::SHIFT && col == 0 &&
-      buttons[1].lastStable == LOW) {
-    int len = clampInt(modP(state.currentSlot, 0), 1, 16);
-    c.sub4 = (int16_t)clampInt(c.sub4 + steps, 0, len - 1);
-    markEdited();
-    return;
-  }
   // Первая колонка TOPOLOGY — оси карты: энкодер ведёт X, TAP — Y, и
   // обе ходят по узлам сетки, а не по единицам. Затригованный шаг
   // правится так же, иначе он ездил бы по другим правилам, чем слот.
@@ -3527,12 +3282,8 @@ const uint8_t appIcons[APP_COUNT][8] = {
   {0x03, 0x0C, 0x10, 0x20, 0x40, 0x40, 0x80, 0x80},
   // ADD — исходная нота снизу, добавленная (полая) сверху
   {0x78, 0x48, 0x78, 0x00, 0x00, 0x78, 0x78, 0x00},
-  // SHIFT — цепочка ячеек со стрелкой возврата
-  {0x00, 0x7E, 0x42, 0x7E, 0x42, 0x7E, 0x08, 0x1C},
   // LOGIC — силуэт вентиля: два входа слева, выход справа
   {0x00, 0xF8, 0x86, 0x81, 0x81, 0x86, 0xF8, 0x00},
-  // MATH — плюс над минусом, знак арифметики
-  {0x00, 0x18, 0x18, 0xFF, 0x18, 0x18, 0x00, 0xFF},
   // KEYTRACK — рампа над клавиатурой
   {0x03, 0x0C, 0x30, 0xC0, 0x00, 0xFF, 0xDB, 0xFF},
   // MULTX — один вход расходится веером
@@ -3814,32 +3565,6 @@ void drawTopoMap(uint8_t slot, uint8_t x, uint16_t color) {
   printCentered(x + TX, TW, Display::COL_Y + 2, b, color);
   sprintf(b, "Y%d", topoNodeIdx(vy, TOPO_NY) + 1);
   printCentered(x + TX, TW, Display::COL_Y + 11, b, color);
-}
-
-// Сам регистр SHIFT: сетка 4×4, но нарисованы только LEN ячеек, так что
-// энкодер буквально наращивает и укорачивает её. Залитая ячейка —
-// голова чтения, она и есть индикация хода. Пока держишь TAP (то есть
-// правишь ROT), заливка перескакивает на голову ЗАПИСИ: видно, куда
-// именно ляжет новый материал, а не только что играет сейчас.
-void drawShiftReg(uint8_t slot, uint8_t x, bool showWrite, uint16_t color) {
-  constexpr uint8_t PITCH = 4, CELL = 3, COLS = 4;
-  constexpr uint8_t SPAN = (COLS - 1) * PITCH + CELL;   // 15 px
-  const uint8_t gx = x + (Display::COL_W - SPAN) / 2;
-  const uint8_t gy = Display::COL_Y + (Display::COL_H - SPAN) / 2;
-
-  const SlotRt &r = rt[slot];
-  uint8_t len = (uint8_t)clampInt(modP(slot, 0), 1, 16);
-  int     rot = clampInt(modSub4(slot), 0, 15) % len;
-  uint8_t rd  = (uint8_t)(r.shPos % len);
-  uint8_t mark = showWrite ? (uint8_t)((rd + rot) % len) : rd;
-
-  for (uint8_t i = 0; i < len; i++) {
-    uint8_t cx = gx + (i % COLS) * PITCH;
-    uint8_t cy = gy + (i / COLS) * PITCH;
-    if (i == mark)                display.fillRect(cx, cy, CELL, CELL, color);
-    else if ((r.shRest >> i) & 1) display.drawPixel(cx + 1, cy + 1, color);
-    else                          display.drawRect(cx, cy, CELL, CELL, color);
-  }
 }
 
 // Столбики эха у NOTE DELAY: сколько нот, столько и палочек, а высота
@@ -4154,7 +3879,7 @@ void drawSlotPage() {
 
     // Слой перехватывает колонку ДО всех остальных веток: у половины
     // модулей своя графика с выходом по continue, и иначе в слое
-    // рисовались бы карта TOPOLOGY, регистр SHIFT и прочие картинки
+    // рисовались бы карта TOPOLOGY, облако DUST и прочие картинки
     // вместо привязок.
     if (state.modLayer) {
       char lb[8], vb[8];
@@ -4240,15 +3965,6 @@ void drawSlotPage() {
     if (!state.subPage && (AppId)c.app == AppId::DUST && i == 0) {
       printCentered(x, Display::COL_W, Display::COL_Y + 2, label, fg);
       drawDustField(state.currentSlot, x, fg);
-      if (state.selectedCol == i)
-        drawCornerCursor(x, Display::COL_Y, Display::COL_W, Display::COL_H, fg);
-      continue;
-    }
-
-    // Первая колонка SHIFT — сам регистр: длина видна как размер сетки,
-    // ход — как бегущая заливка.
-    if (!state.subPage && (AppId)c.app == AppId::SHIFT && i == 0) {
-      drawShiftReg(state.currentSlot, x, buttons[1].lastStable == LOW, fg);
       if (state.selectedCol == i)
         drawCornerCursor(x, Display::COL_Y, Display::COL_W, Display::COL_H, fg);
       continue;
@@ -4504,7 +4220,7 @@ void loadSettings() {
 // через 2 секунды после правки, патчи — только вручную. Иначе одна
 // неосторожная правка затирала бы сохранённое.
 constexpr uint16_t PATCH_MAGIC = 0x4348;   // 'CH'
-constexpr uint8_t  PATCH_VER   = 4;   // 2: без SIEVE; 3: карта модуляции; 4: без META
+constexpr uint8_t  PATCH_VER   = 5;   // 2: без SIEVE; 3: карта модуляции; 4: без META; 5: без SHIFT и MATH
 
 struct Patch {
   uint16_t magic;

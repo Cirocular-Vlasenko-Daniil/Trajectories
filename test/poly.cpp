@@ -26,10 +26,8 @@ int main() {
   printf("  %-12s %5s %5s\n", "модуль", "нот", "шина");
   struct { AppId a; const char *n; } list[] = {
     {AppId::ARP,"ARPEGGIO"}, {AppId::STRUM,"STRUM"}, {AppId::NDELAY,"NDELAY"},
-    {AppId::GLIDER,"GLIDER"}, {AppId::ADD,"ADD"}, {AppId::SHIFT,"SHIFT"},
-    {AppId::DUST,"DUST"}, {AppId::ENV,"ENVELOPE"}, {AppId::MLFO,"MORPH LFO"},
-    {AppId::KEYTRK,"KEYTRACK"}, {AppId::LOGIC,"LOGIC"}, {AppId::MATH,"MATH"},
-    {AppId::MULTX,"MULTI OUT"}, {AppId::POLYSPL,"POLY SPLIT"},
+    {AppId::GLIDER,"GLIDER"}, {AppId::ADD,"ADD"},    {AppId::DUST,"DUST"}, {AppId::ENV,"ENVELOPE"}, {AppId::MLFO,"MORPH LFO"},
+    {AppId::KEYTRK,"KEYTRACK"}, {AppId::LOGIC,"LOGIC"},    {AppId::MULTX,"MULTI OUT"}, {AppId::POLYSPL,"POLY SPLIT"},
     {AppId::RROBIN,"ROUND ROBIN"},
   };
   int mono = 0;

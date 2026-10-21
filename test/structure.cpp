@@ -7,7 +7,7 @@ int main() {
   const char *want[] = {
     "EMPTY", "BASIC", "SKELETON", "EUCLIDIAN", "TOPOLOGY",
     "ARPEGGIO", "STRUM", "NOTE DELAY", "ENVELOPE", "MORPH LFO",
-    "DUST", "GLIDER", "ADD", "SHIFT", "LOGIC", "MATH",
+    "DUST", "GLIDER", "ADD", "LOGIC",
     "KEYTRACK", "MULTI OUT", "POLY SPLIT", "ROUND ROBIN",
   };
   ck("число приложений", APP_COUNT, (int)(sizeof(want) / sizeof(*want)));
@@ -67,8 +67,8 @@ int main() {
       g_midi.clear();
       for (int st = 0; st < 32; st++) { fireGenerator(1); serviceScheduler(); g_ms += 20; }
     } else {
-      // В слот A ставим живой генератор: LOGIC и MATH берут материал с
-      // ШИНЫ, а не из capNotes, и на пустом источнике молчат законно.
+      // В слот A ставим живой генератор: LOGIC берёт материал с
+      // ШИНЫ, а не из capNotes, и на пустом источнике молчит законно.
       loadApp(0, (uint8_t)AppId::BASIC);
       cfg[0].running = true; cfg[0].rate = 4; cfg[0].sub4 = 4;
       cfg[0].midiCh = 0;        // источник кормит шину, но сам наружу молчит

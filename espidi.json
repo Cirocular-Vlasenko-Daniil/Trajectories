@@ -4,7 +4,7 @@
   "firmware": "espidi/Trajectories.ino.bin",
   "cover": "cover.png",
   "summary": {
-    "en": "Modular slot sequencer: four slots, 19 modules, chained through ARM, one Scale Engine over everything, modulation routed slot to parameter.",
-    "ru": "Модульный слотовый секвенсер: четыре слота, 19 модулей, цепочки через ARM, общий Scale Engine, модуляция от слота к параметру."
+    "en": "Modular slot sequencer: four slots, 17 modules, chained through ARM, one Scale Engine over everything, modulation routed slot to parameter.",
+    "ru": "Модульный слотовый секвенсер: четыре слота, 17 модулей, цепочки через ARM, общий Scale Engine, модуляция от слота к параметру."
   }
 }

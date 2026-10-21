@@ -26,7 +26,7 @@ int main() {
     else notSrc++;
   }
   printf("  не может вести: %d модулей\n", notSrc);
-  ck("источников ровно шесть", src, 6);
+  ck("источников ровно пять", src, 5);
   ck("генератор источником не бывает", isModSource((uint8_t)AppId::BASIC), 0);
   ck("роутер тоже", isModSource((uint8_t)AppId::RROBIN), 0);
 

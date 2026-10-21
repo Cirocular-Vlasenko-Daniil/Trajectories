@@ -46,7 +46,6 @@ int main() {
   row("STRUM",      AppId::STRUM);
   row("NOTE DELAY", AppId::NDELAY);
   row("ADD",        AppId::ADD);
-  row("SHIFT",      AppId::SHIFT);
   row("RROBIN cyc", AppId::RROBIN, 0);
   row("RROBIN chrd",AppId::RROBIN, 3);
   row("MULTI OUT",  AppId::MULTX);

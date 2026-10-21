@@ -3,7 +3,7 @@
 Модульный слотовый секвенсер и MIDI-процессор для **ESP32-C3 / ESPidi**.
 Экран 128×32, один энкодер с кнопкой, три кнопки, DIN MIDI in/out.
 
-Четыре слота **A–D**. В каждый грузится одно из 19 приложений — генератор
+Четыре слота **A–D**. В каждый грузится одно из 17 приложений — генератор
 нот или процессор. Слоты соединяются в цепочки параметром **ARM**: слот
 читает вывод другого слота и обрабатывает его. Весь материал проходит
 через общий Scale Engine: у каждого генератора свой лад и тоника, и они
@@ -26,9 +26,9 @@ python3 tools/espidi_hub.py install --slot 1 Cirocular-Vlasenko-Daniil/Trajector
 ## Что внутри
 
 **Генераторы** — BASIC, SKELETON, EUCLIDIAN, TOPOLOGY.
-**Над нотами** — ARPEGGIO, STRUM, NOTE DELAY, GLIDER, ADD, SHIFT, DUST.
+**Над нотами** — ARPEGGIO, STRUM, NOTE DELAY, GLIDER, ADD, DUST.
 **Над CC** — ENVELOPE, MORPH LFO, KEYTRACK.
-**Утилиты** — LOGIC, MATH.
+**Утилиты** — LOGIC.
 **Роутеры** — MULTI OUT, POLY SPLIT, ROUND ROBIN.
 
 Полифония настоящая и внутри цепочки: сколько нот выставлено на шаге,
