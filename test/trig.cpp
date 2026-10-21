@@ -169,5 +169,61 @@ int main() {
     ck("и её никто не оборвал", m.empty() ? -1 : (m[0].on ? 1 : 0), 1);
   }
 
+  printf("\n=== Алгоритмические: рисунок только за алгоритмом ===\n");
+  // EUCLIDIAN с нулём импульсов обязан молчать. Раньше ручной триг
+  // пробивал алгоритм, и снять его после запрета было бы нечем.
+  reset();
+  loadApp(0, (uint8_t)AppId::EUCLIDIAN);
+  cfg[0].midiCh = 1; cfg[0].scale = SCALE_CHROMATIC;
+  cfg[0].p[0] = 8; cfg[0].p[1] = 0; cfg[0].p[2] = 0; cfg[0].p[3] = 60;
+  cfg[0].sub4 = 127;                  // TRG CHANCE полностью открыт
+  rt[0].stepIndex = 0;
+  cfg[0].lane[0] = 0xFFFF;            // залежавшийся триг из старой прошивки
+  cfg[0].lane[3] = 0xFFFF;
+  {
+    int shown = 0;
+    for (int s = 0; s < 16; s++) if (generatorHit(0, s)) shown++;
+    printf("  PULSE=0, хитов:            %d\n", shown);
+    ck("ноль импульсов это тишина", shown, 0);
+    g_midi.clear();
+    for (int s = 0; s < 8; s++) step(0);
+    ck("и звука тоже нет", (int)noteList().size(), 0);
+  }
+  // Теперь без залежавшихся тригов — так слот выглядит после переноса.
+  for (int col = 0; col < NUM_COLS; col++) cfg[0].lane[col] = 0;
+  cfg[0].p[1] = 4;
+  {
+    int shown = 0;
+    for (int s = 0; s < 8; s++) if (generatorHit(0, s)) shown++;
+    printf("  PULSE=4 из 8, хитов:       %d\n", shown);
+    ck("алгоритм даёт ровно свои импульсы", shown, 4);
+  }
+
+  printf("\n=== Перенос чистит триги у алгоритмических ===\n");
+  nvsClear();
+  reset();
+  loadApp(0, (uint8_t)AppId::EUCLIDIAN);
+  loadApp(1, (uint8_t)AppId::BASIC);
+  cfg[0].lane[2] = 0x00FF;            // мусор от прошивки до переноса
+  cfg[1].lane[0] = 0; cfg[1].lane[1] = 0; cfg[1].lane[2] = 0;
+  storage.begin("trajectories", false);
+  storage.putBytes("cfg", cfg, sizeof(cfg));
+  storage.end();                      // ключа версии нет — как у старой прошивки
+  for (uint8_t s = 0; s < NUM_SLOTS; s++) cfg[s] = SlotCfg{};
+  loadSettings();
+  printf("  EUCLID lane[2] после:      %04x\n", cfg[0].lane[2]);
+  printf("  BASIC  lane[0] после:      %04x\n", cfg[1].lane[0]);
+  ck("у алгоритмического триги сняты", cfg[0].lane[2], 0);
+  ck("ручной генератор не замолчал", cfg[1].lane[0], 0xFFFF);
+  // Повторная загрузка ничего не трогает: снять все триги — законное
+  // состояние, и возвращать их каждую загрузку нельзя.
+  cfg[1].lane[0] = 0;
+  storage.begin("trajectories", false);
+  storage.putBytes("cfg", cfg, sizeof(cfg));
+  storage.end();
+  loadSettings();
+  printf("  BASIC  lane[0] повторно:   %04x\n", cfg[1].lane[0]);
+  ck("перенос не повторяется", cfg[1].lane[0], 0);
+
   return done("TRIG");
 }

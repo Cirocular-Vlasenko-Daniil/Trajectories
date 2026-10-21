@@ -1403,13 +1403,6 @@ inline bool laneOn(const SlotCfg &c, uint8_t col, uint16_t absStep) {
   return c.lane[col] & (1u << (absStep % 16));
 }
 
-// Есть ли хоть один триг на шаге — любой лейн заставляет шаг звучать
-// поверх алгоритма.
-bool anyLaneOn(const SlotCfg &c, uint16_t absStep) {
-  for (uint8_t col = 0; col < NUM_COLS; col++) if (laneOn(c, col, absStep)) return true;
-  return false;
-}
-
 // Только голосовые лейны. У BASIC и SKELETON четвёртая колонка это не
 // голос (TRIG — длина, MODE — направление чтения), и звучать шагу она
 // приказывать не должна: иначе длину нельзя было бы задать шагу,
@@ -1433,14 +1426,17 @@ bool generatorHit(uint8_t slot, uint16_t absStep) {
       // ей соответствует первая дорожка.
       uint8_t trk = (state.selectedCol == 0) ? 0 : (uint8_t)(state.selectedCol - 1);
       uint8_t vel;
-      return topoHit(slot, trk, (uint8_t)absStep, vel) || anyLaneOn(c, absStep);
+      // Рисунок целиком за алгоритмом: ручной триг его больше не
+      // перебивает. Иначе карта показывала одно, а звучало другое, и
+      // понять, откуда взялся лишний удар, было нельзя.
+      return topoHit(slot, trk, (uint8_t)absStep, vel);
     }
     case AppId::EUCLIDIAN: {
       uint8_t steps = (uint8_t)clampInt(paramAtStep(slot, 0, absStep), 1, 16);
       uint8_t pulses = (uint8_t)clampInt(paramAtStep(slot, 1, absStep), 0, steps);
       uint8_t rot = (uint8_t)(clampInt(paramAtStep(slot, 2, absStep), 0, 15) % steps);
-      if (euclidHit(absStep, steps, pulses, rot)) return true;
-      break;
+      // Как и у TOPOLOGY — только алгоритм, без ручных дополнений.
+      return euclidHit(absStep, steps, pulses, rot);
     }
     case AppId::BASIC:
     case AppId::SKELETON:
@@ -1451,7 +1447,6 @@ bool generatorHit(uint8_t slot, uint16_t absStep) {
     default:
       return false;
   }
-  return anyLaneOn(c, absStep);
 }
 
 // Добавляет голос в аккорд шага. Если после квантования он падает на
@@ -1549,9 +1544,9 @@ void fireGenerator(uint8_t slot) {
     }
     case AppId::EUCLIDIAN: {
       // TRG CHANCE — вероятность, что уже выпавший хит реально сыграет.
-      // Затригованный вручную шаг ей не подчиняется: раз его поставили
-      // руками, он должен звучать наверняка.
-      if (hit && !anyLaneOn(c, r.stepIndex) && modSub4(slot) < 127 && random(0, 128) > modSub4(slot)) hit = false;
+      // Исключений у неё больше нет: ручных тригов у алгоритмического
+      // генератора не существует, и обходить её нечему.
+      if (hit && modSub4(slot) < 127 && random(0, 128) > modSub4(slot)) hit = false;
       pitch = quantizeToScale(paramAtStep(slot, 3, r.stepIndex), modScale(slot), modRoot(slot));
       break;
     }
@@ -3094,9 +3089,11 @@ void updateButtons() {
       // ещё один "двойной".
       state.encSWLastPress = 0;
       SlotCfg &c = cfg[state.currentSlot];
-      if (!state.subPage && isGenerator(c.app)) {
+      if (!state.subPage && isHandGenerator((AppId)c.app)) {
         // Триг на шаге под курсором — только для ВЫБРАННОЙ колонки,
         // у каждой колонки свой лейн (как active[4] в RED SEA).
+        // Только у ручных генераторов: у алгоритмических рисунок
+        // считает алгоритм, и ставить шаги руками там нечего.
         uint8_t k = rt[state.currentSlot].cursor & 15;
         uint8_t col = state.selectedCol;
         uint16_t bit = (uint16_t)(1u << k);
@@ -3169,7 +3166,7 @@ void handleEncoder() {
   // Зажатый ENC_SW + вращение двигает курсор шага по ряду. Это
   // нажатие гасим как половинку двойного клика: иначе следующее
   // быстрое нажатие спарилось бы с ним и случайно зафиксировало шаг.
-  if (buttons[3].lastStable == LOW && isGenerator(c.app) && !state.subPage) {
+  if (buttons[3].lastStable == LOW && isHandGenerator((AppId)c.app) && !state.subPage) {
     SlotRt &r = rt[state.currentSlot];
     // Курсор ходит по длине паттерна, а не всегда по 16: за её краем
     // ячеек уже не нарисовано.
@@ -3213,11 +3210,7 @@ void handleEncoder() {
     if (buttons[1].lastStable == LOW) {
       c.sub2 = topoNodeStep(c.sub2, steps, TOPO_NY);
     } else {
-      uint8_t k = rt[state.currentSlot].cursor & 15;
-      if (c.lane[0] & (uint16_t)(1u << k))
-        c.stepVal[k][0] = (int8_t)topoNodeStep(c.stepVal[k][0], steps, TOPO_NX);
-      else
-        c.p[0] = topoNodeStep(c.p[0], steps, TOPO_NX);
+      c.p[0] = topoNodeStep(c.p[0], steps, TOPO_NX);
     }
     markEdited();
     return;
@@ -3299,7 +3292,7 @@ void handleEncoder() {
   // Если шаг под курсором затригован по этой колонке — крутим значение
   // САМОГО ШАГА, а не общий параметр слота (так же ведёт себя энкодер
   // на странице секвенсера в RED SEA).
-  if (!state.subPage && isGenerator(c.app)) {
+  if (!state.subPage && isHandGenerator((AppId)c.app)) {
     uint8_t k = rt[state.currentSlot].cursor & 15;
     if (c.lane[col] & (uint16_t)(1u << k)) {
       c.stepVal[k][col] = (int8_t)nudgeValue(state.currentSlot, d, c.stepVal[k][col], steps);
@@ -3725,6 +3718,10 @@ void drawStepRow(uint8_t slot) {
   // ради этого выше на два пикселя: три различимые полосы по 2 px не
   // помещаются в четыре внутренних пикселя обычного квадрата.
   const bool topo = (AppId)c.app == AppId::TOPOLOGY;
+  // У ручного генератора ряд это редактор: в нём есть курсор и метки
+  // тригов. У алгоритмического — только индикация того, что насчитал
+  // алгоритм.
+  const bool hand = isHandGenerator((AppId)c.app);
   const uint8_t CELL_H = topo ? 8 : 6;
   constexpr uint8_t CELL_W = 6, TOTAL = 7, Y = 1;
   // Рисуем ровно столько ячеек, сколько в паттерне, и центрируем их:
@@ -3765,7 +3762,9 @@ void drawStepRow(uint8_t slot) {
       if (isPlay && !flash) display.drawFastHLine(x, Y - 1, CELL_W, SSD1306_WHITE);
     } else {
       bool hit = generatorHit(slot, base + i);
-      bool trig = c.lane[state.selectedCol] & (uint16_t)(1u << i);
+      // Метка трига есть только у ручного генератора: у EUCLIDIAN
+      // рисунок считает алгоритм, и показывать там нечего.
+      bool trig = hand && (c.lane[state.selectedCol] & (uint16_t)(1u << i));
 
       if (isPlay && flash) display.fillRect(x, Y, CELL_W, CELL_H, SSD1306_WHITE);
       else display.fillRect(x, Y, CELL_W, CELL_H, hit ? SSD1306_WHITE : SSD1306_BLACK);
@@ -3780,8 +3779,10 @@ void drawStepRow(uint8_t slot) {
     }
 
     // Курсор выведен под ячейку: внутри неё места под лишний признак
-    // нет, а полоса под рядом всё равно пустует.
-    if (i == r.cursor) display.drawFastHLine(x, Y + CELL_H + 1, CELL_W, SSD1306_WHITE);
+    // нет, а полоса под рядом всё равно пустует. У алгоритмического
+    // генератора курсора нет вовсе — ряд там только индикация, и
+    // указывать в нём не на что.
+    if (hand && i == r.cursor) display.drawFastHLine(x, Y + CELL_H + 1, CELL_W, SSD1306_WHITE);
   }
 }
 
@@ -3923,10 +3924,12 @@ void drawSlotPage() {
     return;
   }
 
-  // На главной странице генератора колонка живёт по правилам
+  // На главной странице РУЧНОГО генератора колонка живёт по правилам
   // секвенсера RED SEA: инверсия означает "на шаге под курсором стоит
   // триг этой колонки", а показанное значение — значение ЭТОГО шага.
-  bool seqCols = isGenerator(c.app) && !state.subPage;
+  // У алгоритмического значений на шаг нет, и колонка показывает
+  // обычный параметр слота.
+  bool seqCols = isHandGenerator((AppId)c.app) && !state.subPage;
   uint8_t k = rt[state.currentSlot].cursor & 15;
 
   // Приём модулятором отмечаем одной затухающей рамкой вокруг всего
@@ -4235,9 +4238,15 @@ void loadSettings() {
   // видно. Делается РОВНО один раз: снять все триги — законное
   // состояние, и отнимать его у пользователя нельзя.
   if (sver < 1) {
-    for (uint8_t s = 0; s < NUM_SLOTS; s++)
+    for (uint8_t s = 0; s < NUM_SLOTS; s++) {
       if (isHandGenerator((AppId)cfg[s].app) && !(cfg[s].lane[0] | cfg[s].lane[1] | cfg[s].lane[2]))
         cfg[s].lane[0] = 0xFFFF;
+      // А у алгоритмических триги, наоборот, снимаются: ставить их
+      // больше нечем, и оставшиеся от старой прошивки продолжали бы
+      // подменять параметр на шаге без всякой возможности их убрать.
+      if (isAlgoGenerator((AppId)cfg[s].app))
+        for (uint8_t col = 0; col < NUM_COLS; col++) cfg[s].lane[col] = 0;
+    }
   }
 
   // Защита от мусора во флеше: диапазоны, деление на ноль в модульной
