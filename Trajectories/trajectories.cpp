@@ -114,6 +114,23 @@ inline bool isProcessor(uint8_t app) {
   return app >= (uint8_t)FIRST_PROCESSOR && app < APP_COUNT;
 }
 
+// Генераторы делятся на два семейства, и это разделение проходит
+// через весь интерфейс.
+//   РУЧНЫЕ (BASIC, SKELETON) — рисунок задаёт паттерн: шаг звучит
+//     только там, где стоит триг, пауза задаётся явно, у шага есть
+//     курсор и свои значения.
+//   АЛГОРИТМИЧЕСКИЕ (EUCLIDIAN, TOPOLOGY) — рисунок считает алгоритм,
+//     ряд шагов только показывает результат, выставлять шаги руками
+//     нельзя, курсора нет.
+// Проверять приложения по именам в каждой ветке интерфейса было
+// ошибкой: правило одно, и жить оно должно в одном месте.
+inline bool isHandGenerator(AppId a) {
+  return a == AppId::BASIC || a == AppId::SKELETON;
+}
+inline bool isAlgoGenerator(AppId a) {
+  return a == AppId::EUCLIDIAN || a == AppId::TOPOLOGY;
+}
+
 // Тип отрисовки значения параметра.
 // P_CHAN — номер MIDI-канала: 0 показывается как NO и означает «наружу
 // не шлём». Отдельный тип, чтобы это правило жило в одном месте, а не
@@ -973,11 +990,18 @@ struct SchedNote {
   // (STRUM, NOTE DELAY, GLIDER): публиковать их разом наперёд значит
   // отдать следующему звену один аккорд вместо череды нот.
   int8_t pub;
+  // Слот-ВЛАДЕЛЕЦ события, если это прямой выход генератора; -1 у
+  // всех остальных. По нему генератор гасит собственную предыдущую
+  // ноту, когда шаг перезапущен: длина трига может тянуться через
+  // несколько шагов, и без гашения старая нота звучала бы вместе с
+  // новой. Процессоры владельца не ставят — их растянутые во времени
+  // выходы (STRUM, NOTE DELAY, GLIDER) обрывать нельзя.
+  int8_t src;
 };
 SchedNote sched[MAX_SCHED];
 
 void scheduleNote(uint8_t note, uint8_t vel, uint8_t ch, uint32_t delayMs, uint32_t gateMs,
-                  int8_t pub = -1) {
+                  int8_t pub = -1, int8_t src = -1) {
   // Канал NO больше не повод выбросить событие: наружу оно не уйдёт,
   // но на шину попасть обязано — иначе цепочка за модулем оборвётся.
   if (ch == 0 && pub < 0) return;
@@ -985,7 +1009,7 @@ void scheduleNote(uint8_t note, uint8_t vel, uint8_t ch, uint32_t delayMs, uint3
   uint32_t now = millis();
   for (uint8_t i = 0; i < MAX_SCHED; i++) {
     if (sched[i].used) continue;
-    sched[i] = {true, false, note, vel, ch, now + delayMs, now + delayMs + gateMs, pub};
+    sched[i] = {true, false, note, vel, ch, now + delayMs, now + delayMs + gateMs, pub, src};
     return;
   }
   // Пул забит — самое старое запланированное событие вытесняется,
@@ -993,7 +1017,19 @@ void scheduleNote(uint8_t note, uint8_t vel, uint8_t ch, uint32_t delayMs, uint3
   uint8_t oldest = 0;
   for (uint8_t i = 1; i < MAX_SCHED; i++) if (sched[i].onAt < sched[oldest].onAt) oldest = i;
   if (sched[oldest].on && sched[oldest].ch) sendNoteOffRaw(sched[oldest].ch, sched[oldest].note);
-  sched[oldest] = {true, false, note, vel, ch, now + delayMs, now + delayMs + gateMs, pub};
+  sched[oldest] = {true, false, note, vel, ch, now + delayMs, now + delayMs + gateMs, pub, src};
+}
+
+// Снимает всё, что ещё звучит с прямого выхода генератора слота.
+// Вызывается перед выдачей нового шага: перезапуск шага обязан
+// оборвать предыдущую ноту, а не наложиться на неё.
+void killGenNotes(uint8_t slot) {
+  for (uint8_t i = 0; i < MAX_SCHED; i++) {
+    if (!sched[i].used || sched[i].src != (int8_t)slot) continue;
+    if (sched[i].on && sched[i].ch) sendNoteOffRaw(sched[i].ch, sched[i].note);
+    sched[i].used = false;
+    sched[i].on = false;
+  }
 }
 
 // publish() определена ниже, вместе с шиной — планировщику нужен
@@ -1374,6 +1410,16 @@ bool anyLaneOn(const SlotCfg &c, uint16_t absStep) {
   return false;
 }
 
+// Только голосовые лейны. У BASIC и SKELETON четвёртая колонка это не
+// голос (TRIG — длина, MODE — направление чтения), и звучать шагу она
+// приказывать не должна: иначе длину нельзя было бы задать шагу,
+// который обязан молчать.
+constexpr uint8_t VOICE_LANES = 3;
+bool voiceLaneOn(const SlotCfg &c, uint16_t absStep) {
+  for (uint8_t col = 0; col < VOICE_LANES; col++) if (laneOn(c, col, absStep)) return true;
+  return false;
+}
+
 // Единственный источник правды о том, есть ли трига на шаге: по нему
 // и играет генератор, и рисуется ряд шагов — картинка не может
 // разойтись со звуком. TRG CHANCE у EUCLID сюда не входит: он
@@ -1398,8 +1444,10 @@ bool generatorHit(uint8_t slot, uint16_t absStep) {
     }
     case AppId::BASIC:
     case AppId::SKELETON:
-      // Фигурные генераторы бьют на каждом шаге.
-      return true;
+      // Шаг звучит только там, где нота забита тригом: ручные
+      // генераторы целиком в руках паттерна, паузы задаются явно.
+      // Раньше они бились на каждом шаге, и выключить шаг было нечем.
+      return voiceLaneOn(c, absStep);
     default:
       return false;
   }
@@ -1471,28 +1519,28 @@ void fireGenerator(uint8_t slot) {
 
   switch ((AppId)c.app) {
     case AppId::BASIC: {
-      // Сколько нот выставлено на шаге, столько и уходит в шину.
-      // NOTE1 — основной голос, он звучит всегда; NOTE2 и NOTE3
-      // добавляются на тех шагах, где на них поставлен триг.
+      // Сколько нот затриговано на шаге, столько и уходит в шину.
+      // Ни один голос не звучит «всегда»: шаг без тригов — пауза.
       uint8_t trig = (uint8_t)clampInt(paramAtStep(slot, 3, r.stepIndex), 1, 16);
       gate = stepMs * trig;
       uint8_t k = (uint8_t)(r.stepIndex % 16);
       uint8_t sc = modScale(slot), rt_ = modRoot(slot);
-      outCount = addVoice(outN, outCount, paramAtStep(slot, 0, r.stepIndex), sc, rt_);
-      for (uint8_t j = 1; j < 3; j++)
+      for (uint8_t j = 0; j < VOICE_LANES; j++)
         if (c.lane[j] & (uint16_t)(1u << k))
           outCount = addVoice(outN, outCount, paramAtStep(slot, j, r.stepIndex), sc, rt_);
       break;
     }
     case AppId::SKELETON: {
-      // То же правило, что у BASIC, но ступенями лада от опорной ноты:
-      // ROOT звучит всегда, INTV2 и INTV3 добавляются там, где на них
-      // стоит триг. Транспонирование ROOT двигает всю фигуру целиком.
+      // То же правило, что у BASIC, но ступенями лада от опорной ноты.
+      // ROOT тоже подчиняется своему тригу: без него интервалы звучат
+      // от него как от немой опоры — так получается аккорд без основного
+      // тона. Транспонирование ROOT двигает всю фигуру целиком.
       uint8_t k = (uint8_t)(r.stepIndex % 16);
       uint8_t sc = modScale(slot), rt_ = modRoot(slot);
       int16_t rootDeg = paramAtStep(slot, 0, r.stepIndex);
-      outCount = addVoice(outN, outCount, transposeDegrees(rootDeg, 0, sc, rt_), sc, rt_);
-      for (uint8_t j = 1; j < 3; j++)
+      if (c.lane[0] & (uint16_t)(1u << k))
+        outCount = addVoice(outN, outCount, transposeDegrees(rootDeg, 0, sc, rt_), sc, rt_);
+      for (uint8_t j = 1; j < VOICE_LANES; j++)
         if (c.lane[j] & (uint16_t)(1u << k))
           outCount = addVoice(outN, outCount,
                               transposeDegrees(rootDeg, paramAtStep(slot, j, r.stepIndex), sc, rt_),
@@ -1548,12 +1596,23 @@ void fireGenerator(uint8_t slot) {
 
   // Публикуем на шину всегда — даже с CH = NO генератор остаётся
   // источником для процессоров ниже по цепочке.
-  if (outCount == 0) { outN[0] = pitch; outCount = 1; }
+  // Заглушка «ноль нот — сыграй хоть одну» нужна только тем, кто
+  // считает одну высоту в pitch. У BASIC и SKELETON ноль нот это
+  // настоящая пауза, и подставлять им нечего.
+  if (outCount == 0) {
+    if (isHandGenerator((AppId)c.app)) return;
+    outN[0] = pitch;
+    outCount = 1;
+  }
   // До MIDI дубль тоже не должен доходить: иначе два Note On на одном
   // канале, и гейт первого гасит второй.
   outCount = dedupeChord(outN, nullptr, outCount);
+  // Длина трига может тянуться через несколько шагов. Новый шаг
+  // обязан оборвать предыдущую ноту этого же генератора, иначе они
+  // звучат наложением и плотный паттерн превращается в кашу.
+  killGenNotes(slot);
   for (uint8_t i = 0; i < outCount; i++)
-    if (c.midiCh) scheduleNote(outN[i], DEFAULT_VEL, c.midiCh, 0, gate);
+    if (c.midiCh) scheduleNote(outN[i], DEFAULT_VEL, c.midiCh, 0, gate, -1, (int8_t)slot);
   publish(slot, outN, outCount, gate, modScale(slot), modRoot(slot));
 }
 
@@ -2819,6 +2878,11 @@ void loadApp(uint8_t slot, uint8_t app) {
     for (uint8_t s = 0; s < 16; s++)
       c.stepVal[s][col] = isGenerator(app) ? (int8_t)c.p[col] : 0;
   }
+  // Ручной генератор звучит только по тригам, а свежезагруженный
+  // модуль обязан звучать. Поэтому первый голос затригован на всех
+  // шагах: это в точности прежнее поведение, и паузы делаются
+  // снятием тригов, а не их расстановкой с нуля.
+  if (isHandGenerator((AppId)app)) c.lane[0] = 0xFFFF;
   rt[slot] = SlotRt{};
   // 0 — валидное значение CC, поэтому «ещё ничего не слали» помечаем
   // невозможным 255: иначе первая же отправка нуля была бы съедена
@@ -4141,10 +4205,17 @@ void updateDisplay() {
 // ============================================================
 // 17. ХРАНИЛИЩЕ
 // ============================================================
+// Версия живых настроек. Патчи от другой версии просто не грузятся, а
+// рабочее состояние переживает обновление прошивки — значит разовые
+// переносы нужны именно здесь.
+//   1 — ручные генераторы перешли на триги: шаг без трига молчит.
+constexpr uint16_t SETTINGS_VER = 1;
+
 void saveSettings() {
   storage.begin("trajectories", false);
   storage.putBytes("cfg", cfg, sizeof(cfg));
   storage.putUShort("bpm", state.bpm);
+  storage.putUShort("sver", SETTINGS_VER);
   storage.end();
 }
 
@@ -4154,7 +4225,20 @@ void loadSettings() {
     storage.getBytes("cfg", cfg, sizeof(cfg));
   }
   state.bpm = storage.getUShort("bpm", 120);
+  uint16_t sver = storage.getUShort("sver", 0);
   storage.end();
+
+  // Перенос на модель тригов. До версии 1 у BASIC и SKELETON лейны
+  // были пусты, пока в них ничего не ставили руками, — а теперь
+  // пустой лейн означает тишину. Без переноса слот с генератором
+  // замолчал бы после обновления прошивки, и причину было бы не
+  // видно. Делается РОВНО один раз: снять все триги — законное
+  // состояние, и отнимать его у пользователя нельзя.
+  if (sver < 1) {
+    for (uint8_t s = 0; s < NUM_SLOTS; s++)
+      if (isHandGenerator((AppId)cfg[s].app) && !(cfg[s].lane[0] | cfg[s].lane[1] | cfg[s].lane[2]))
+        cfg[s].lane[0] = 0xFFFF;
+  }
 
   // Защита от мусора во флеше: диапазоны, деление на ноль в модульной
   // арифметике генераторов и выход за границы таблиц.
@@ -4210,6 +4294,12 @@ void loadSettings() {
     // Флеш мог быть записан ещё в другом ладу — приводим к текущему.
     requantizeSlotNotes(s);
   }
+  // Перенос фиксируется только теперь, когда состояние уже приведено к
+  // допустимым диапазонам: записать во флеш непроверенный мусор было бы
+  // хуже, чем не записать ничего. И фиксировать обязательно — иначе
+  // перенос повторялся бы каждую загрузку и возвращал триги тому, кто
+  // снял их нарочно.
+  if (sver < SETTINGS_VER) saveSettings();
 }
 
 // ============================================================
@@ -4220,7 +4310,7 @@ void loadSettings() {
 // через 2 секунды после правки, патчи — только вручную. Иначе одна
 // неосторожная правка затирала бы сохранённое.
 constexpr uint16_t PATCH_MAGIC = 0x4348;   // 'CH'
-constexpr uint8_t  PATCH_VER   = 5;   // 2: без SIEVE; 3: карта модуляции; 4: без META; 5: без SHIFT и MATH
+constexpr uint8_t  PATCH_VER   = 6;   // 2: без SIEVE; 3: карта модуляции; 4: без META; 5: без SHIFT и MATH; 6: триги у ручных генераторов
 
 struct Patch {
   uint16_t magic;
