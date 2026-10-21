@@ -7,62 +7,89 @@ void band(int rows) {
     printf("|\n");
   }
 }
+// Ставит слоту 2 привязку: его колонку col ведёт слот src с глубиной d.
+void bind(uint8_t tgt, bool sub, uint8_t col, uint8_t src, int d) {
+  uint8_t mi = (uint8_t)((sub ? NUM_COLS : 0) + col);
+  cfg[tgt].modSrc[mi] = src;
+  cfg[tgt].modDepth[mi] = (int8_t)d;
+}
+
 int main() {
   setvbuf(stdout, NULL, _IONBF, 0);
 
-  printf("=== 1. Внешний CC доезжает до таблицы ===\n");
+  printf("=== 1. Источником может быть только модуль с непрерывным выходом ===\n");
   reset();
-  memset(ccVal, 0, sizeof(ccVal));
-  // Байты как с провода: статус 0xB1, номер, значение.
-  midiRunningStatus = 0xB1; midiHaveFirstData = true; midiPendingByte = 74;
-  { uint8_t data = 100, type = midiRunningStatus & 0xF0;
-    midiHaveFirstData = false;
-    if (type == 0xB0) ccVal[midiPendingByte & 0x7F] = (uint8_t)(data & 0x7F); }
-  ck("CC 74 записан", ccVal[74], 100);
-
-  printf("\n=== 2. Привязка ведёт параметр ===\n");
-  reset();
-  loadApp(0, (uint8_t)AppId::TOPOLOGY);
-  cfg[0].running = true; cfg[0].p[1] = 64;      // плотность дорожки 1
-  cfg[0].modCC[MP_MAIN + 1] = 74;               // ведём её контроллером 74
-  cfg[0].modDepth[MP_MAIN + 1] = 64;
-  int seen[3];
-  int vals[3] = {0, 64, 127};
-  for (int k = 0; k < 3; k++) {
-    ccVal[74] = (uint8_t)vals[k];
-    serviceSlots();
-    seen[k] = modP(0, 1);
-    printf("  CC74=%3d -> плотность %3d (хранится %d)\n", vals[k], seen[k], (int)cfg[0].p[1]);
+  int src = 0, notSrc = 0;
+  for (uint8_t a = 1; a < APP_COUNT; a++) {
+    if (isModSource(a)) { printf("  может вести: %s%s\n", apps[a].name,
+                                 isModBipolar(a) ? "  (двусторонний)" : "  (от нуля)"); src++; }
+    else notSrc++;
   }
-  ck("центр ничего не меняет", seen[1], 64);
-  ck("минимум уводит вниз", seen[0] < 20, 1);
-  ck("максимум уводит вверх", seen[2] > 110, 1);
-  ck("хранимое значение не испорчено", cfg[0].p[1], 64);
-  cfg[0].modDepth[MP_MAIN + 1] = -64;
-  ccVal[74] = 127; serviceSlots();
-  printf("  при глубине -64 и CC=127: %d\n", modP(0, 1));
-  ck("знак глубины разворачивает ход", modP(0, 1) < 20, 1);
+  printf("  не может вести: %d модулей\n", notSrc);
+  ck("источников ровно шесть", src, 6);
+  ck("генератор источником не бывает", isModSource((uint8_t)AppId::BASIC), 0);
+  ck("роутер тоже", isModSource((uint8_t)AppId::RROBIN), 0);
 
-  printf("\n=== 3. Свой модуль как источник, без петли через MIDI ===\n");
+  printf("\n=== 2. Листание пропускает непригодные слоты ===\n");
   reset();
-  memset(ccVal, 0, sizeof(ccVal));
-  loadApp(0, (uint8_t)AppId::BASIC);
-  cfg[0].running = true; cfg[0].rate = 4; cfg[0].midiCh = 0; cfg[0].p[0] = 60;
-  loadApp(1, (uint8_t)AppId::MLFO);
-  cfg[1].arm = 0; cfg[1].running = true; cfg[1].midiCh = 0;   // наружу молчит
-  cfg[1].ccDest = 50; cfg[1].p[3] = 127; cfg[1].sub4 = 2;
-  loadApp(2, (uint8_t)AppId::TOPOLOGY);
-  cfg[2].running = true; cfg[2].p[1] = 64;
-  cfg[2].modCC[MP_MAIN + 1] = 50; cfg[2].modDepth[MP_MAIN + 1] = 64;
-  int lo = 999, hi = -999;
-  for (int t = 0; t < 3000; t++) {
-    onClockTick(); serviceSlots(); serviceScheduler();
-    g_ms += 2; g_us += 2000; state.midiTicks++;
-    int v = modP(2, 1);
-    if (v < lo) lo = v; if (v > hi) hi = v;
+  loadApp(0, (uint8_t)AppId::BASIC);      // A — генератор, вести не может
+  loadApp(1, (uint8_t)AppId::MLFO);       // B — может
+  loadApp(2, (uint8_t)AppId::TOPOLOGY);   // C — цель, вести не может
+  loadApp(3, (uint8_t)AppId::ENV);        // D — может
+  uint8_t v = MOD_NO;
+  printf("  от NO вперёд:");
+  for (int i = 0; i < 4; i++) {
+    v = modSrcStep(2, v, +1);
+    printf(" %s", v == MOD_NO ? "NO" : (v == MOD_EXT ? "EXT" : std::string(1, (char)('A'+v-1)).c_str()));
   }
-  printf("  LFO с каналом NO ведёт плотность: %d..%d\n", lo, hi);
-  ck("внутренний источник работает без MIDI наружу", hi - lo > 40, 1);
+  printf("\n");
+  v = MOD_NO;
+  v = modSrcStep(2, v, +1); ck("первый пригодный — B", v, 2);
+  v = modSrcStep(2, v, +1); ck("за ним D (A и C пропущены)", v, 4);
+  v = modSrcStep(2, v, +1); ck("дальше EXT", v, MOD_EXT);
+  v = modSrcStep(2, v, +1); ck("на EXT упирается", v, MOD_EXT);
+  v = modSrcStep(2, v, -1); ck("назад к D", v, 4);
+
+  printf("\n=== 3. Глубина мерится в единице самого параметра ===\n");
+  reset();
+  struct { const char *n; AppId a; bool sub; uint8_t col; } cs[] = {
+    {"плотность TOPOLOGY", AppId::TOPOLOGY, false, 1},
+    {"MODE 1CH/3CH",       AppId::TOPOLOGY, true,  2},
+    {"SHAPE у MORPH LFO",  AppId::MLFO,     false, 0},
+    {"RATE",               AppId::BASIC,    true,  0},
+    {"STEPS 1..16",        AppId::BASIC,    true,  3},
+  };
+  for (auto &c : cs) {
+    reset(); loadApp(0, (uint8_t)c.a);
+    PDesc d = columnDesc(0, c.sub, c.col);
+    printf("  %-20s %-6s %3d значений -> предел глубины %s%d\n",
+           c.n, d.name, d.hi - d.lo + 1,
+           modBySteps(d) ? "" : "", modDepthLimit(d));
+  }
+  reset(); loadApp(0, (uint8_t)AppId::TOPOLOGY);
+  ck("у переключителя предел ±1", modDepthLimit(columnDesc(0, true, 2)), 1);
+  ck("у плотности — проценты",    modDepthLimit(columnDesc(0, false, 1)), 100);
+
+  printf("\n=== 3b. Переключатель наконец щёлкает ===\n");
+  reset();
+  loadApp(0, (uint8_t)AppId::MLFO); cfg[0].arm = 1; cfg[0].midiCh = 0;
+  loadApp(1, (uint8_t)AppId::TOPOLOGY); cfg[1].running = true;
+  applyColumn(1, true, 2, 0);                 // MODE = 1CH
+  bind(1, true, 2, 1, +1);                    // ведёт слот A
+  std::set<int> got;
+  for (int cc = 0; cc <= 127; cc += 1) {
+    busSnap[0].ccValue = (uint8_t)cc;
+    clearModOffsets();
+    // применяем только привязки
+    PDesc d = columnDesc(1, true, 2);
+    modOffset[1][NUM_COLS + 2] =
+      (int16_t)modShift(d, cfg[1].modDepth[NUM_COLS + 2], cc, isModBipolar(cfg[0].app));
+    got.insert(modParam(1, true, 2));
+  }
+  printf("  значения MODE за свип источника: ");
+  for (int x : got) printf("%d ", x);
+  printf("\n");
+  ck("переключатель принимает оба значения", (int)got.size(), 2);
 
   printf("\n=== 4. Жест через НАСТОЯЩИЙ обработчик кнопок ===\n");
   // Гоняем updateButtons() с реальными пинами и дебаунсом. Прошлая
@@ -108,17 +135,15 @@ int main() {
 
   printf("\n=== 5. Как слой выглядит ===\n");
   reset();
-  memset(ccVal, 0, sizeof(ccVal));
-  loadApp(0, (uint8_t)AppId::BASIC);
-  loadApp(1, (uint8_t)AppId::MLFO); cfg[1].arm = 0;
+  loadApp(0, (uint8_t)AppId::MLFO);
+  loadApp(1, (uint8_t)AppId::ENV);
   loadApp(2, (uint8_t)AppId::TOPOLOGY);
   loadApp(3, (uint8_t)AppId::ARP);  cfg[3].arm = 2;
-  cfg[2].modCC[MP_MAIN + 1] = 50; cfg[2].modDepth[MP_MAIN + 1] = 48;
-  cfg[2].modCC[MP_MAIN + 3] = 74; cfg[2].modDepth[MP_MAIN + 3] = -20;
-  cfg[0].modCC[MP_MAIN + 0] = 12; cfg[0].modDepth[MP_MAIN + 0] = 30;
+  bind(2, false, 1, 1, +50);          // плотность ведёт слот A (LFO)
+  bind(2, false, 3, MOD_EXT, -25);    // третью дорожку — внешняя ручка
   state.currentSlot = 2; state.subPage = false; state.selectedCol = 1;
   state.modLayer = false; drawSlotPage();
-  printf("TOPOLOGY, обычный вид (рамки у A и C — их ведут):\n"); band(32);
+  printf("TOPOLOGY, обычный вид:\n"); band(32);
   state.modLayer = true; drawSlotPage();
   printf("\nтот же слот, слой модуляции:\n"); band(32);
 
@@ -133,13 +158,11 @@ int main() {
     return n;
   };
   for (uint8_t sl = 0; sl < NUM_SLOTS; sl++)
-    printf("  слот %c: привязок %d, пикселей рамки %d\n",
+    printf("  слот %c: ведут=%d, пикселей рамки %d\n",
            'A' + sl, slotModulated(sl) ? 1 : 0, framed(sl));
-  ck("A помечен",       framed(0) >= 6, 1);
-  ck("B не помечен",    framed(1) <= 2, 1);
-  ck("C помечен",       framed(2) >= 6, 1);
-  ck("D не помечен",    framed(3) <= 2, 1);
-  cfg[2].modDepth[MP_MAIN + 1] = 0; cfg[2].modDepth[MP_MAIN + 3] = 0;
+  ck("C помечен",     framed(2) >= 6, 1);
+  ck("A не помечен",  framed(0) <= 2, 1);
+  bind(2, false, 1, 1, 0); bind(2, false, 3, MOD_EXT, 0);
   drawSlotPage();
   ck("нулевая глубина рамку снимает", framed(2) <= 2, 1);
 

@@ -5,6 +5,7 @@
 #include <vector>
 #include <string>
 #include <set>
+#include <array>
 #include <cstdint>
 #define main traj_main_unused
 #include "../Trajectories/trajectories.cpp"

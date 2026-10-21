@@ -61,7 +61,7 @@ enum class AppId : uint8_t {
   BASIC, SKELETON, EUCLIDIAN, TOPOLOGY,
   // Процессоры — трансформируют захваченный по ARM сигнал.
   ARP, STRUM, NDELAY, ENV, MLFO, DUST, GLIDER, ADD, SHIFT, LOGIC, MATH, KEYTRK,
-  MULTX, POLYSPL, RROBIN, META,
+  MULTX, POLYSPL, RROBIN,
   COUNT
 };
 
@@ -84,7 +84,7 @@ const uint8_t browseOrder[APP_COUNT] = {
   // CC — производят модуляцию наружу
   (uint8_t)AppId::ENV, (uint8_t)AppId::MLFO, (uint8_t)AppId::KEYTRK,
   // UTIL — считают и управляют самим устройством
-  (uint8_t)AppId::LOGIC, (uint8_t)AppId::MATH, (uint8_t)AppId::META,
+  (uint8_t)AppId::LOGIC, (uint8_t)AppId::MATH,
   // ROUTE — раскладывают сигнал по каналам
   (uint8_t)AppId::MULTX, (uint8_t)AppId::POLYSPL, (uint8_t)AppId::RROBIN
 };
@@ -92,7 +92,7 @@ const uint8_t browseOrder[APP_COUNT] = {
 const char* const groupNames[] = {"EMPTY", "GEN", "NOTE", "CC", "UTIL", "ROUTE"};
 constexpr uint8_t GROUP_COUNT = 6;
 // Границы групп в browseOrder: начало каждой плюс конец списка.
-const uint8_t groupStart[GROUP_COUNT + 1] = {0, 1, 5, 12, 15, 18, APP_COUNT};
+const uint8_t groupStart[GROUP_COUNT + 1] = {0, 1, 5, 12, 15, 17, APP_COUNT};
 
 uint8_t groupOfPos(uint8_t pos) {
   for (uint8_t g = 0; g < GROUP_COUNT; g++)
@@ -175,14 +175,9 @@ const char* const rrSteal[]     = {"OLD", "NEW", "DROP"};
 // вместо них стоит номер MIDI-канала этого выхода.
 const char* const outLines[]    = {"O1", "O2", "O3", "O4", "O5", "O6", "O7"};
 // МетаПерформер: чем модулировать и три цели.
-const char* const metaSrc[]     = {"NOTE", "CC", "GATE"};
-const char* const metaT[]       = {"T1", "T2", "T3"};
-const char* const metaD[]       = {"D1", "D2", "D3"};
 // Имена для спрятанного под TAP. Отличаются от подписей колонок
 // намеренно: в списке целей глубина L1 и номер CC этой же линии —
 // разные параметры, и одинаково звать их нельзя.
-const char* const ktCCNames[]   = {"CC1", "CC2", "CC3", "CC4"};
-const char* const outChNames[]  = {"CH1", "CH2", "CH3", "CH4", "CH5", "CH6", "CH7"};
 // Последнее значение — «источника нет», доступно только второму ARM:
 // первый источник у процессора есть всегда.
 const char* const armNames[]    = {"A", "B", "C", "D", "EXT", "NO"};
@@ -199,9 +194,6 @@ const char* const rootNames[]   = {"C","C#","D","D#","E","F","F#","G","G#","A","
 const uint8_t rateTicks[5] = {96, 48, 24, 12, 6};
 // Диатонические интервалы ADD: 3-я/5-я/6-я/7-я = 2/4/5/6 ступеней лада.
 const int8_t addDegrees[4] = {2, 4, 5, 6};
-// Имена нот дорожек TOPOLOGY как целей модуляции — в списке META
-// они обязаны отличаться и от плотностей, и друг от друга.
-const char* const topoNoteNames[] = {"NT1", "NT2", "NT3"};
 
 struct AppDesc {
   const char* name;
@@ -268,7 +260,8 @@ const AppDesc apps[APP_COUNT] = {
              {"PPONG", 0, 63,  P_NUM,  nullptr},
              {"DECAY", 0, 127, P_NUM,  nullptr}},
             // На подстранице эта колонка не рисуется: у процессора там
-            // своё. Имя нужно, чтобы META могла назвать цель.
+            // своё, но диапазон настоящий — здесь живёт деление
+            // интервала эха, вторая строчка колонки RPEAT.
             {"DIV", 0, 4, P_LIST, rateNames}},
 
   {"ENVELOPE",{{"SHAPE", 0, 2,   P_LIST, envShape},
@@ -324,7 +317,7 @@ const AppDesc apps[APP_COUNT] = {
              {"CMP",   0, 2,   P_LIST, logicCmp},
              {"REL",   0, 3,   P_LIST, logicRel},
              {"OUT",   0, 3,   P_LIST, logicOut}},
-            // На подстранице не рисуется; имя нужно META как цели.
+            // На подстранице не рисуется: тут образец для сравнения CC.
             {"CCVAL", 0, 127, P_NUM, nullptr}},
 
   // MATH — арифметика над сигналами. В отличие от LOGIC не решает,
@@ -368,16 +361,6 @@ const AppDesc apps[APP_COUNT] = {
              {"MODE",  0, 3,   P_LIST, rrMode},
              {"STEAL", 0, 2,   P_LIST, rrSteal},
              {"SPRD",  -7, 7,  P_SIGN, nullptr}},
-            {"", 0, 0, P_NUM, nullptr}},
-
-  // METAP — модулирует параметры ДРУГИХ слотов. Колонка-цель хранит
-  // адрес: слот под TAP, номер параметра на энкодере. Смещение
-  // накладывается на чтении, хранимое значение цели не трогается.
-  // Порядок строки обязан совпадать с местом METAP в enum AppId.
-  {"META",{{"SRC",    0, 2,   P_LIST, metaSrc},
-             {metaT[0], 0, 71,  P_NUM,  nullptr},
-             {metaT[1], 0, 71,  P_NUM,  nullptr},
-             {metaT[2], 0, 71,  P_NUM,  nullptr}},
             {"", 0, 0, P_NUM, nullptr}}
 };
 
@@ -422,13 +405,11 @@ PDesc processorSubDesc(uint8_t app, uint8_t col) {
     if ((AppId)app == AppId::KEYTRK) return {"CENTR", 0, 127, P_NOTE, nullptr};
     // Верхняя зона сплита — свой канал, CC DEST модулю не нужен.
     if ((AppId)app == AppId::POLYSPL) return {"CH HI", 0, 16, P_CHAN, nullptr};
-    if ((AppId)app == AppId::META)   return {metaD[1], -64, 64, P_SIGN, nullptr};
   }
   if (col == 0) {
     // Нижняя зона сплита и базовый канал RROBIN живут там же, где
     // обычный CH: это и есть настройка канала.
     if ((AppId)app == AppId::POLYSPL) return {"CH LO", 0, 16, P_CHAN, nullptr};
-    if ((AppId)app == AppId::META)   return {metaD[0], -64, 64, P_SIGN, nullptr};
     // У RROBIN каналы теперь у каждого голоса свои, общий CH не нужен —
     // его место занял STEP+, вытесненный парами каналов.
     if ((AppId)app == AppId::RROBIN)  return {"STEP+", -12, 12, P_SIGN, nullptr};
@@ -452,18 +433,15 @@ PDesc processorSubDesc(uint8_t app, uint8_t col) {
   // SHIFT не шлёт CC, поэтому CCDST у него мертва — колонка отдана
   // приращению velocity за круг: петля затухает или раскачивается.
   if (col == 2 && (AppId)app == AppId::SHIFT) return {"VEL", -64, 64, P_SIGN, nullptr};
-  if (col == 3 && (AppId)app == AppId::META)  return {metaD[2], -64, 64, P_SIGN, nullptr};
   return procSub[col];
 }
 inline bool usesSub2(uint8_t app) {
   return (AppId)app == AppId::SHIFT ||
          (AppId)app == AppId::STRUM || (AppId)app == AppId::ENV ||
-         (AppId)app == AppId::KEYTRK || (AppId)app == AppId::POLYSPL ||
-         (AppId)app == AppId::META;
+         (AppId)app == AppId::KEYTRK || (AppId)app == AppId::POLYSPL;
 }
 inline bool usesSub3(uint8_t app) {
-  return (AppId)app == AppId::ENV || (AppId)app == AppId::KEYTRK ||
-         (AppId)app == AppId::META;
+  return (AppId)app == AppId::ENV || (AppId)app == AppId::KEYTRK;
 }
 const PDesc genSub[3] = {
   // BPM и RATE делят одну колонку: BPM общий на устройство и трогается
@@ -614,7 +592,6 @@ struct SlotCfg {
   uint8_t ktCC[NUM_COLS];
   // Маршрутизаторы (MULTX/SPLIT): MIDI-канал каждого выхода, 0 — выход
   // выключен; и сдвиг выхода в ступенях лада.
-  int8_t  metaDepth[3];   // METAP: глубина по каждой из трёх целей
   uint8_t outCh[8];
   int8_t  outXp[8];
   uint8_t rate;          // генераторы: деление такта
@@ -638,10 +615,12 @@ struct SlotCfg {
   // цепочка за слотом продолжает получать сигнал.
   bool    bypass;
   bool    running;       // транспорт (общий, двойной клик TAP)
-  // Карта модуляции слота: на какой CC смотрит каждая его колонка и с
-  // какой глубиной. Индекс тот же, что у modOffset: 0..3 — главная
-  // страница, 4..7 — подстраница. 0 в modCC = привязки нет.
-  uint8_t modCC[2 * NUM_COLS];
+  // Карта модуляции слота: КТО ведёт каждую его колонку и с какой
+  // глубиной. Индекс тот же, что у modOffset: 0..3 — главная страница,
+  // 4..7 — подстраница. Источник — слот, а не номер CC: номер был
+  // деталью протокола, которая требовала держать в голове магическую
+  // цифру и сверять её на двух страницах.
+  uint8_t modSrc[2 * NUM_COLS];     // MOD_NO, 1..NUM_SLOTS = слот, MOD_EXT
   int8_t  modDepth[2 * NUM_COLS];
 };
 
@@ -675,6 +654,36 @@ Signal busSnap[NUM_SLOTS];
 // разные цепочки, а не одну общую. Ноты на каналах 5..16 игнорируются:
 // слота, который бы их слушал, попросту нет.
 Signal extSignal[NUM_SLOTS];
+
+constexpr uint8_t MOD_NO  = 0;
+constexpr uint8_t MOD_EXT = NUM_SLOTS + 1;
+// Карта внешних контроллеров: 4 слота по 8 колонок, подряд от 20.
+// Вписывать номер руками не нужно — прибор сам показывает, какой слать.
+constexpr uint8_t MOD_EXT_CC0 = 20;
+inline uint8_t extModCC(uint8_t slot, uint8_t idx) {
+  return (uint8_t)(MOD_EXT_CC0 + slot * 2 * NUM_COLS + idx);
+}
+
+// Вести параметр может только модуль с непрерывным выходом — ровно те
+// шесть, что кладут значение в ccValue шины. У генераторов, нотных
+// процессоров и роутеров непрерывного выхода нет, и в списке их не будет.
+inline bool isModSource(uint8_t app) {
+  switch ((AppId)app) {
+    case AppId::MLFO: case AppId::ENV: case AppId::KEYTRK:
+    case AppId::MATH: case AppId::DUST: case AppId::NDELAY: return true;
+    default: return false;
+  }
+}
+// Двусторонний ли выход у источника. Решает модуль, а не пользователь:
+// волна LFO, кейтрекинг и качание эха построены вокруг 64, а огибающая,
+// плотность и результат арифметики растут от нуля. Внешняя ручка — тоже
+// от нуля: в нуле она должна означать «ничего».
+inline bool isModBipolar(uint8_t app) {
+  switch ((AppId)app) {
+    case AppId::MLFO: case AppId::KEYTRK: case AppId::NDELAY: return true;
+    default: return false;
+  }
+}
 
 // Последнее значение каждого контроллера — и пришедшего извне, и
 // отправленного своим же модулем. Одна таблица на оба случая: для
@@ -731,11 +740,6 @@ struct SlotRt {
   // насколько арпеджио двигается вслед за клавишей.
   uint8_t  arpAnchor;
   bool     arpAnchorSet;
-  // META: наблюдаемый диапазон источника и сглаженное значение.
-  float    metaLo, metaHi, metaVal;
-  int16_t  metaRawPrev;
-  bool     metaSeen;
-  uint32_t metaLastMs;
   // LOGIC
   uint32_t lastGridStep;   // тик последнего шага слота-сетки
   bool     sawA, sawB;     // источник выдал ноту с прошлой проверки
@@ -764,15 +768,20 @@ SlotRt rt[NUM_SLOTS];
 constexpr uint8_t MP_MAIN  = 0;
 constexpr uint8_t MP_SUB   = 4;
 constexpr uint8_t MP_ROOT  = 8;
-constexpr uint8_t MP_BPM   = 9;
+// Индексы 8 и выше с удалением META перестали чем-либо адресоваться:
+// слой модуляции покрывает восемь ВИДИМЫХ колонок (0..7), а вторые
+// строки — тонику, BPM, Y карты, номера CC — вести больше нечем.
+// Чтения modRoot/modSub4/modKtCC по ним остались и всегда дают нуль;
+// таблицу не сжимаю, чтобы вернуть их было одной правкой.
+constexpr uint8_t MP_BPM   [[maybe_unused]] = 9;
 // Индекс 10 свободен: на нём жил оператор удалённого SIEVE. Не
 // переиспользуем, чтобы не сдвинуть MP_EXTRA и то, что за ним.
 constexpr uint8_t MP_EXTRA = 11;
 // Вторая строка ПЕРВОЙ колонки главной страницы. У генератора sub4 —
 // это четвёртая колонка подстраницы (MP_SUB+3), а у процессора совсем
 // другой параметр: ROT у SHIFT, деление у NOTE DELAY, образец CC у
-// LOGIC. Один индекс на двоих означал бы, что META, целясь в STEP+,
-// заодно двигает ROT.
+// LOGIC. Один индекс на двоих означал бы, что модуляция STEP+ заодно
+// двигает ROT.
 constexpr uint8_t MP_TOPO_Y = MP_EXTRA + 3;   // Y карты TOPOLOGY
 constexpr uint8_t MP_SUB4P  = MP_EXTRA + 4;   // sub4 процессора
 constexpr uint8_t MP_COUNT = 18;
@@ -787,6 +796,51 @@ inline int16_t modAt(uint8_t slot, uint8_t idx, int16_t base, int16_t lo, int16_
 }
 
 void clearModOffsets() { memset(modOffset, 0, sizeof(modOffset)); }
+
+// Глубина измеряется в той единице, в которой параметр вообще
+// существует. У списка из трёх позиций «пятьдесят процентов» — величина
+// без смысла, поэтому до восьми значений глубина считает ПОЗИЦИИ, а
+// дальше — проценты диапазона. Переключатель из двух значений при этом
+// перестаёт быть особым случаем: у него предел ±1.
+constexpr uint8_t MOD_STEPS_MAX = 8;
+inline bool modBySteps(const PDesc &d) { return (d.hi - d.lo + 1) <= MOD_STEPS_MAX; }
+inline int  modDepthLimit(const PDesc &d) {
+  return modBySteps(d) ? (d.hi - d.lo) : 100;
+}
+
+// Насколько единиц цели уводит источник. Двусторонний отсчитывается от
+// центра 64 и на полной глубине даёт половину диапазона в каждую
+// сторону; односторонний растёт от нуля и даёт весь диапазон в сторону
+// знака. Делим с округлением: при усечении у коротких параметров
+// пропадала почти вся ручка глубины.
+// Следующий пригодный источник. Слоты без непрерывного выхода и сам
+// слот пропускаются — так же, как armSkipSelf пропускает самого себя.
+uint8_t modSrcStep(uint8_t slot, uint8_t cur, int dir) {
+  if (!dir) return cur;
+  int v = cur;
+  for (uint8_t guard = 0; guard <= MOD_EXT + 1; guard++) {
+    v += (dir > 0) ? 1 : -1;
+    if (v < MOD_NO) return MOD_NO;
+    if (v > MOD_EXT) return MOD_EXT;
+    if (v == MOD_NO || v == MOD_EXT) return (uint8_t)v;
+    uint8_t ss = (uint8_t)(v - 1);
+    if (ss != slot && isModSource(cfg[ss].app)) return (uint8_t)v;
+  }
+  return cur;
+}
+
+int modShift(const PDesc &d, int depth, int cc, bool bipolar) {
+  if (!depth) return 0;
+  long num, den;
+  if (modBySteps(d)) {
+    num = (long)(bipolar ? cc - 64 : cc) * depth;
+    den = bipolar ? 64 : 127;
+  } else {
+    num = (long)(bipolar ? cc - 64 : cc) * depth * (d.hi - d.lo);
+    den = (long)(bipolar ? 64 * 2 : 127) * 100;
+  }
+  return (int)((num >= 0) ? (num + den / 2) / den : -((-num + den / 2) / den));
+}
 
 // Значение параметра с учётом модуляции. Хранимое значение не
 // трогается: смещение добавляется только в момент чтения.
@@ -1102,17 +1156,6 @@ const Signal* armSource(uint8_t slot, uint8_t which) {
   if (a >= ARM_NONE) return nullptr;
   if (a == slot) return nullptr;          // сам на себя — источника нет
   if (a >= NUM_SLOTS) return &extSignal[slot];
-  // META в шину ничего не кладёт — он модулирует, а не обрабатывает.
-  // Армленный на него слот берёт то, что читает сам META: модуль
-  // становится прозрачным, а не немым звеном посреди цепочки. Число
-  // прыжков ограничено, поэтому цепочка из META не зацикливается.
-  for (uint8_t hop = 0; hop < NUM_SLOTS && (AppId)cfg[a].app == AppId::META; hop++) {
-    uint8_t nxt = cfg[a].arm;
-    if (nxt >= ARM_NONE || nxt == a) return nullptr;
-    if (nxt >= NUM_SLOTS) return &extSignal[slot];
-    a = nxt;
-  }
-  if ((AppId)cfg[a].app == AppId::META) return nullptr;   // кольцо из META
   return &busSnap[a];
 }
 
@@ -1978,8 +2021,7 @@ void onCapture(uint8_t slot) {
       // это музыкально правильнее.
       uint8_t note = lowestOf(r);
       // Через модуляцию, как и всё остальное в приборе: раньше глубины,
-      // опора и размах читались напрямую, и META, целясь в них, молча
-      // не делала ничего.
+      // опора и размах читались напрямую и модуляции не подчинялись.
       int center = clampInt(modParam(slot, true, 2), 0, 127);
       int span = clampInt(modParam(slot, true, 3), 1, 48);
       for (uint8_t i = 0; i < NUM_COLS; i++) {
@@ -2451,147 +2493,14 @@ void fireArpStep(uint8_t slot) {
   publish(slot, one, 1, 60, r.capScale, r.capRoot, ov);
 }
 
-// Адрес цели METAP упакован в число 0..31: слот, страница, колонка.
-// Собственный слот из перебора исключён — модуль не может целиться в
-// себя, это была бы мгновенная обратная связь без задержки цикла.
-inline uint8_t metaTgtSlot(int16_t a) { return (uint8_t)(a / MP_COUNT); }
-inline uint8_t metaTgtIdx (int16_t a) { return (uint8_t)(a % MP_COUNT); }
-constexpr int16_t META_ADDR_MAX = NUM_SLOTS * MP_COUNT;
-
-// Описание параметра по плоскому номеру. Пустое имя означает, что у
-// этого приложения такого параметра нет и адрес пропускается.
-PDesc metaParamDesc(uint8_t slot, uint8_t idx) {
-  const SlotCfg &c = cfg[slot];
-  const PDesc none = {"", 0, 0, P_NUM, nullptr};
-  if (c.app == (uint8_t)AppId::EMPTY) return none;
-  if (idx < MP_SUB) return apps[c.app].p[idx];
-  if (idx < MP_SUB + NUM_COLS) {
-    uint8_t col = (uint8_t)(idx - MP_SUB);
-    // ARM модулировать нельзя: перекидывание маршрута на ходу не
-    // музыкальный приём, а потеря управления.
-    if (isProcessor(c.app) && col == 1) return none;
-    // У RROBIN колонки 3 и 4 подстраницы держат по ДВА канала голосов;
-    // как цели они адресуются поштучно ниже, среди спрятанного.
-    if ((AppId)c.app == AppId::RROBIN && col >= 2) return none;
-    return columnDesc(slot, true, col);
-  }
-  if (!isGenerator(c.app)) {
-    // Вторая строка первой колонки — у каждого процессора своя.
-    if (idx == MP_SUB4P) {
-      PDesc d = apps[c.app].sub4;
-      return d.name[0] ? d : none;
-    }
-    // Спрятанное под TAP у процессоров.
-    if ((AppId)c.app == AppId::KEYTRK && idx >= MP_EXTRA && idx < MP_EXTRA + 4)
-      return {ktCCNames[idx - MP_EXTRA], 0, 127, P_NUM, nullptr};
-    if ((AppId)c.app == AppId::MULTX && idx >= MP_EXTRA && idx < MP_EXTRA + 7)
-      return {outChNames[idx - MP_EXTRA], 0, 16, P_CHAN, nullptr};
-    if ((AppId)c.app == AppId::RROBIN && idx >= MP_EXTRA && idx < MP_EXTRA + 4)
-      return {outChNames[idx - MP_EXTRA], 0, 16, P_CHAN, nullptr};
-    return none;
-  }
-  // У TOPOLOGY под TAP спрятана половина модуля: Y карты и ноты дорожек.
-  if ((AppId)c.app == AppId::TOPOLOGY) {
-    if (idx == MP_TOPO_Y) return {"Y", 0, 127, P_NUM, nullptr};
-    if (idx >= MP_EXTRA && idx < MP_EXTRA + TOPO_TRACKS)
-      return {topoNoteNames[idx - MP_EXTRA], 0, 127, P_NOTE, nullptr};
-  }
-  // Не "ROOT": у SKELETON так зовётся колонка с опорной НОТОЙ, и в
-  // списке целей META две разные вещи оказывались одноимёнными.
-  if (idx == MP_ROOT) return {"KEY", 0, 11, P_LIST, rootNames};
-  if (idx == MP_BPM)  return {"BPM", 20, 300, P_NUM, nullptr};
-  return none;
-}
 
 // Следующий валидный адрес при вращении: пропускает свой слот и
 // колонки без имени (у части приложений их меньше четырёх).
-int16_t metaNextAddr(uint8_t slot, int16_t a, int dir) {
-  int step = (dir >= 0) ? 1 : -1;
-  for (int16_t guard = 0; guard < META_ADDR_MAX; guard++) {
-    a = (int16_t)((a + step + META_ADDR_MAX) % META_ADDR_MAX);
-    if (metaTgtSlot(a) == slot) continue;        // на себя не целимся
-    if (metaParamDesc(metaTgtSlot(a), metaTgtIdx(a)).name[0]) return a;
-  }
-  return a;
-}
 
 // Раскладывает модуляцию по целям. Считается от значения источника,
 // нормируется под диапазон каждой цели: иначе одна и та же глубина
 // на списке из трёх значений и на шкале 0-127 вела бы себя
 // несопоставимо.
-void serviceMeta(uint8_t slot) {
-  const SlotCfg &c = cfg[slot];
-  SlotRt &r = rt[slot];
-
-  // Сырое значение источника берём, только если оно есть. Нет данных —
-  // держим прошлое, иначе модуляция дёргалась бы в ноль между нотами.
-  bool have = false;
-  int raw = 0;
-  switch ((uint8_t)clampInt(c.p[0], 0, 2)) {
-    case 1: {
-      const Signal* sg = armSource(slot, 0);
-      if (sg) { raw = (int)sg->ccValue; have = true; }
-      break;
-    }
-    case 2:
-      if (r.capGateMs) { raw = (int)r.capGateMs; have = true; }
-      break;
-    default:
-      if (r.capCount) { raw = (int)lowestOf(r); have = true; }
-      break;
-  }
-
-  uint32_t now = millis();
-  uint32_t dt = now - r.metaLastMs;
-  r.metaLastMs = now;
-
-  if (have) {
-    // Нормировать по абсолютной шкале нельзя: ноты живут в пределах
-    // пары октав, длина гейта — в сотнях миллисекунд, значение CC — во
-    // всех 0..127. По общей мерке первые два почти не сдвигали бы
-    // цель, а постоянный сигнал давал бы постоянный перекос. Поэтому
-    // META следит за РЕАЛЬНЫМ размахом источника и растягивает
-    // модуляцию на него.
-    if (!r.metaSeen) {
-      r.metaLo = r.metaHi = (float)raw;
-      r.metaSeen = true;
-      r.metaRawPrev = (int16_t)raw;
-    }
-    if (raw != r.metaRawPrev) {
-      r.metaRawPrev = (int16_t)raw;
-      // Окно раздаётся мгновенно и медленно стягивается — так оно
-      // подхватывает новый материал, но не застревает на старом.
-      float k = (float)dt * 0.0001f;
-      if (k > 0.05f) k = 0.05f;
-      if (raw < r.metaLo) r.metaLo = (float)raw; else r.metaLo += ((float)raw - r.metaLo) * k;
-      if (raw > r.metaHi) r.metaHi = (float)raw; else r.metaHi += ((float)raw - r.metaHi) * k;
-    }
-    float span = r.metaHi - r.metaLo;
-    // Источник стоит на месте — модулировать нечем, держим середину.
-    float n = (span > 0.5f) ? (((float)raw - r.metaLo) / span) * 2.0f - 1.0f : 0.0f;
-    // Сглаживание по времени, а не по числу проходов: loop крутится
-    // тысячи раз в секунду, и покадровый коэффициент был бы мгновенным.
-    float sk = (float)dt / 30.0f;
-    if (sk > 1.0f) sk = 1.0f;
-    r.metaVal += (n - r.metaVal) * sk;
-  }
-
-  for (uint8_t i = 0; i < 3; i++) {
-    int16_t a = c.p[1 + i];
-    uint8_t ts = metaTgtSlot(a);
-    if (ts == slot) continue;            // на себя не целимся
-    uint8_t ti = metaTgtIdx(a);
-    PDesc d2 = metaParamDesc(ts, ti);
-    if (!d2.name[0]) continue;
-    int depth = clampInt(c.metaDepth[i], -64, 64);
-    if (!depth) continue;
-    // Полная глубина — размах во весь диапазон цели, то есть по
-    // половине в каждую сторону от хранимого значения. Иначе почти
-    // любая модуляция упиралась бы в границу и стояла там.
-    modOffset[ts][ti] +=
-      (int16_t)(r.metaVal * (float)depth / 64.0f * (float)(d2.hi - d2.lo) / 2.0f);
-  }
-}
 
 void serviceSlots() {
   // У внешнего входа своего лада нет — берём его у первого генератора
@@ -2619,26 +2528,37 @@ void serviceSlots() {
   // байпаснутый МетаПерформер сразу перестаёт влиять, а хранимые
   // значения целей никогда не портятся.
   clearModOffsets();
-  // Привязки по CC. Центр 64 ничего не меняет, края дают размах на
-  // половину диапазона цели в каждую сторону — та же мерка, что у META,
-  // но без слежения за размахом: CC нормирован по определению.
+  // Привязки: колонку ведёт СЛОТ. Что именно он подаёт, решает сам —
+  // у всех шести возможных источников это их единственный непрерывный
+  // выход, уже лежащий в ccValue шины. Берём СНИМОК: источник может
+  // стоять ниже по цепочке, и кольцо не должно виснуть.
   static_assert(MP_MAIN == 0 && MP_SUB == NUM_COLS,
                 "индекс привязки совпадает с индексом modOffset");
   for (uint8_t s = 0; s < NUM_SLOTS; s++) {
     if (cfg[s].bypass) continue;
     for (uint8_t i = 0; i < 2 * NUM_COLS; i++) {
-      uint8_t cc = cfg[s].modCC[i];
+      uint8_t src = cfg[s].modSrc[i];
       int depth = cfg[s].modDepth[i];
-      if (!cc || !depth) continue;
+      if (src == MOD_NO || !depth) continue;
       bool sub = (i >= NUM_COLS);
       PDesc d = columnDesc(s, sub, (uint8_t)(i % NUM_COLS));
       if (!d.name[0]) continue;
+      int cc;
+      bool bipolar;
+      if (src == MOD_EXT) {
+        cc = ccVal[extModCC(s, i)];
+        bipolar = false;                // ручка в нуле означает «ничего»
+      } else {
+        uint8_t ss = (uint8_t)(src - 1);
+        if (ss >= NUM_SLOTS || ss == s || !isModSource(cfg[ss].app)) continue;
+        if (cfg[ss].bypass) continue;   // байпас снимает и модуляцию
+        cc = busSnap[ss].ccValue;
+        bipolar = isModBipolar(cfg[ss].app);
+      }
       modOffset[s][i] +=
-        (int16_t)(((int)ccVal[cc] - 64) * depth * (d.hi - d.lo) / (64 * 64 * 2));
+        (int16_t)modShift(d, depth, clampInt(cc, 0, 127), bipolar);
     }
   }
-  for (uint8_t s = 0; s < NUM_SLOTS; s++)
-    if ((AppId)cfg[s].app == AppId::META && !cfg[s].bypass) serviceMeta(s);
   for (uint8_t s = 0; s < NUM_SLOTS; s++) {
     if (!isProcessor(cfg[s].app)) continue;
     // Захват происходит по триггеру ЛЮБОГО из двух источников, но
@@ -2833,7 +2753,6 @@ void processMIDI() {
 // ============================================================
 // 13. РАБОТА С ПАРАМЕТРАМИ
 // ============================================================
-int16_t metaNextAddr(uint8_t slot, int16_t a, int dir);
 
 void markEdited() {
   state.needSave = true;
@@ -2887,16 +2806,12 @@ int16_t* columnValue(uint8_t slot, bool sub, uint8_t col) {
   }
   switch (col) {
     case 0:
-      // У METAP модулю нечего слать наружу, поэтому место CH занято
-      // первой глубиной; она знаковая, а midiCh беззнаковый.
-      scratch = ((AppId)c.app == AppId::META) ? c.metaDepth[0] : (int16_t)c.midiCh;
+      scratch = (int16_t)c.midiCh;
       return &scratch;
     case 1: scratch = c.arm; return &scratch;
     case 2:
-      if ((AppId)c.app == AppId::META) { scratch = c.metaDepth[1]; return &scratch; }
       return usesSub2(c.app) ? &c.sub2 : (scratch = c.ccDest, &scratch);
     default:
-      if ((AppId)c.app == AppId::META) { scratch = c.metaDepth[2]; return &scratch; }
       return usesSub3(c.app) ? &c.sub3 : (scratch = c.stepPlus, &scratch);
   }
 }
@@ -2996,18 +2911,15 @@ void applyColumn(uint8_t slot, bool sub, uint8_t col, int16_t v) {
   PDesc d = processorSubDesc(c.app, col);
   switch (col) {
     case 0:
-      if ((AppId)c.app == AppId::META) c.metaDepth[0] = (int8_t)clampInt(v, -64, 64);
-      else c.midiCh = (uint8_t)clampInt(v, 0, 16);   // 0 = NO
+      c.midiCh = (uint8_t)clampInt(v, 0, 16);   // 0 = NO
       break;
     case 1: c.arm = armSkipSelf(slot, v, v - (int)c.arm, 0, ARM_EXT); break;
     case 2:
-      if ((AppId)c.app == AppId::META) c.metaDepth[1] = (int8_t)clampInt(v, -64, 64);
-      else if (usesSub2(c.app)) c.sub2 = (int16_t)clampInt(v, d.lo, d.hi);
+      if (usesSub2(c.app)) c.sub2 = (int16_t)clampInt(v, d.lo, d.hi);
       else c.ccDest = (uint8_t)clampInt(v, 0, 127);
       break;
     default:
-      if ((AppId)c.app == AppId::META) c.metaDepth[2] = (int8_t)clampInt(v, -64, 64);
-      else if (usesSub3(c.app)) c.sub3 = (int16_t)clampInt(v, d.lo, d.hi);
+      if (usesSub3(c.app)) c.sub3 = (int16_t)clampInt(v, d.lo, d.hi);
       else c.stepPlus = (int8_t)clampInt(v, -12, 12);
       break;
   }
@@ -3089,14 +3001,6 @@ void loadApp(uint8_t slot, uint8_t app) {
     case AppId::MATH:
       c.p[2] = 4;                           // CONST — сразу слышимый интервал
       break;
-    case AppId::META:
-      // Целимся в соседние слоты, не в себя; глубины в нуле, чтобы
-      // свежезагруженный модуль ничего не крутил без спроса.
-      for (uint8_t i = 0; i < 3; i++) {
-        c.p[1 + i] = metaNextAddr(slot, (int16_t)(slot * MP_COUNT), 1);
-        c.metaDepth[i] = 0;
-      }
-      break;
     case AppId::NDELAY:
       c.p[0] = 3;                           // сама нота и два эха
       c.sub4 = 0;                           // деления нет: интервал = гейт источника
@@ -3139,7 +3043,7 @@ void loadApp(uint8_t slot, uint8_t app) {
   requantizeSlotNotes(slot);
   // Привязки модуляции указывали на колонки ПРЕЖНЕГО приложения — у
   // нового они означают совсем другое, так что карта слота чистится.
-  for (uint8_t i = 0; i < 2 * NUM_COLS; i++) { c.modCC[i] = 0; c.modDepth[i] = 0; }
+  for (uint8_t i = 0; i < 2 * NUM_COLS; i++) { c.modSrc[i] = MOD_NO; c.modDepth[i] = 0; }
   // Триги и запомненные шагами значения относятся к прежнему
   // приложению — у нового колонки означают совсем другое.
   for (uint8_t col = 0; col < NUM_COLS; col++) {
@@ -3448,11 +3352,14 @@ void handleEncoder() {
   // двухстрочный приём, что у SCALE, ARM и половины модулей.
   if (state.modLayer && c.app != (uint8_t)AppId::EMPTY) {
     uint8_t mi = (uint8_t)((state.subPage ? NUM_COLS : 0) + col);
-    if (columnDesc(state.currentSlot, state.subPage, col).name[0]) {
-      if (buttons[1].lastStable == LOW)
-        c.modDepth[mi] = (int8_t)clampInt(c.modDepth[mi] + steps, -64, 64);
-      else
-        c.modCC[mi] = (uint8_t)clampInt(c.modCC[mi] + steps, 0, 127);
+    PDesc dm = columnDesc(state.currentSlot, state.subPage, col);
+    if (dm.name[0]) {
+      if (buttons[1].lastStable == LOW) {
+        int lim = modDepthLimit(dm);
+        c.modDepth[mi] = (int8_t)clampInt(c.modDepth[mi] + steps, -lim, lim);
+      } else {
+        c.modSrc[mi] = modSrcStep(state.currentSlot, c.modSrc[mi], steps);
+      }
       markEdited();
     }
     return;
@@ -3530,27 +3437,6 @@ void handleEncoder() {
       markEdited();
       return;
     }
-  }
-  // У METAP энкодер перебирает параметры целевого слота, а TAP
-  // перескакивает на следующий слот, сохраняя номер колонки.
-  if (!state.subPage && (AppId)c.app == AppId::META && col >= 1) {
-    int16_t a = c.p[col];
-    if (buttons[1].lastStable == LOW) {
-      uint8_t ts = metaTgtSlot(a);
-      for (uint8_t g = 0; g < NUM_SLOTS; g++) {
-        ts = (uint8_t)((ts + (steps >= 0 ? 1 : NUM_SLOTS - 1)) % NUM_SLOTS);
-        if (ts != state.currentSlot) break;
-      }
-      a = (int16_t)(ts * MP_COUNT + metaTgtIdx(a));
-      if (!metaParamDesc(ts, metaTgtIdx(a)).name[0])
-        a = metaNextAddr(state.currentSlot, a, 1);
-    } else {
-      for (int k = 0; k < (steps > 0 ? steps : -steps); k++)
-        a = metaNextAddr(state.currentSlot, a, steps);
-    }
-    c.p[col] = a;
-    markEdited();
-    return;
   }
   // У NDELAY зажатый TAP на колонке RPEAT крутит деление интервала:
   // число повторов меняешь чаще, поэтому оно осталось на энкодере.
@@ -3649,9 +3535,7 @@ const uint8_t appIcons[APP_COUNT][8] = {
   // SPLIT — клавиатура, разрубленная пополам
   {0xFF, 0xDB, 0xFF, 0x10, 0x10, 0xFF, 0xDB, 0xFF},
   // RROBIN — стрелка по кругу
-  {0x3C, 0x42, 0x99, 0x81, 0x81, 0x99, 0x42, 0x3C},
-  // METAP — рука над тремя ручками
-  {0x00, 0x54, 0xFE, 0x54, 0x10, 0x38, 0x54, 0x92}
+  {0x3C, 0x42, 0x99, 0x81, 0x81, 0x99, 0x42, 0x3C}
 };
 
 void drawIcon(uint8_t x, uint8_t y, const uint8_t* bmp, uint16_t color) {
@@ -3717,7 +3601,7 @@ bool slotModulated(uint8_t slot) {
   const SlotCfg &c = cfg[slot];
   if (c.app == (uint8_t)AppId::EMPTY) return false;
   for (uint8_t i = 0; i < 2 * NUM_COLS; i++)
-    if (c.modCC[i] && c.modDepth[i]) return true;
+    if (c.modSrc[i] != MOD_NO && c.modDepth[i]) return true;
   return false;
 }
 
@@ -4180,16 +4064,20 @@ void drawChainHeader(uint8_t slot) {
     }
   }
 
-  // Куда уходит модуляция. Рисуем только работающие цели: с нулевой
-  // глубиной линия врала бы о том, что связь есть.
-  for (uint8_t s = 0; s < NUM_SLOTS; s++) {
-    if ((AppId)cfg[s].app != AppId::META || cfg[s].bypass) continue;
-    for (uint8_t i = 0; i < 3; i++) {
-      if (!cfg[s].metaDepth[i]) continue;
-      uint8_t ts = metaTgtSlot(cfg[s].p[1 + i]);
-      if (ts == s || cfg[ts].app == (uint8_t)AppId::EMPTY) continue;
-      if (!metaParamDesc(ts, metaTgtIdx(cfg[s].p[1 + i])).name[0]) continue;
-      drawModLink(s, ts);
+  // Куда уходит модуляция. Теперь у неё есть определённый источник —
+  // слот, — поэтому линию можно вести от звезды к звезде честно. У EXT
+  // источника на карте нет, и линии тоже.
+  for (uint8_t s2 = 0; s2 < NUM_SLOTS; s2++) {
+    if (cfg[s2].app == (uint8_t)AppId::EMPTY || cfg[s2].bypass) continue;
+    bool drawn[NUM_SLOTS] = {false};
+    for (uint8_t i = 0; i < 2 * NUM_COLS; i++) {
+      uint8_t src = cfg[s2].modSrc[i];
+      if (src == MOD_NO || src == MOD_EXT || !cfg[s2].modDepth[i]) continue;
+      uint8_t ss = (uint8_t)(src - 1);
+      if (ss >= NUM_SLOTS || ss == s2 || drawn[ss]) continue;
+      if (!isModSource(cfg[ss].app)) continue;
+      drawModLink(ss, s2);
+      drawn[ss] = true;
     }
   }
 
@@ -4266,10 +4154,16 @@ void drawSlotPage() {
     if (state.modLayer) {
       char lb[8], vb[8];
       uint8_t mi = (uint8_t)((state.subPage ? NUM_COLS : 0) + i);
-      if (!c.modCC[mi]) { strcpy(lb, "--"); vb[0] = 0; }
+      uint8_t src = c.modSrc[mi];
+      if (src == MOD_NO) { strcpy(lb, "NO"); vb[0] = 0; }
       else {
-        sprintf(lb, "~%d", c.modCC[mi]);
-        sprintf(vb, "%+d", c.modDepth[mi]);
+        // У EXT сразу показан номер контроллера, который надо слать:
+        // карта фиксированная, вписывать ничего не нужно.
+        if (src == MOD_EXT) sprintf(lb, "E%d", extModCC(state.currentSlot, mi));
+        else                sprintf(lb, "%c", (char)('A' + src - 1));
+        // Единица глубины — та, в которой живёт сам параметр.
+        if (modBySteps(d)) sprintf(vb, "%+d", c.modDepth[mi]);
+        else               sprintf(vb, "%+d%%", c.modDepth[mi]);
       }
       display.setTextSize(1);
       printCentered(x, Display::COL_W, Display::COL_Y + 2, lb, SSD1306_WHITE);
@@ -4290,8 +4184,8 @@ void drawSlotPage() {
     label[sizeof(label) - 1] = 0;
 
     // Показываем значение С МОДУЛЯЦИЕЙ, а не хранимое: при работающей
-    // META на экране стояло одно число, а движок использовал другое, и
-    // понять это было нельзя никак.
+    // модуляции на экране стояло одно число, а движок использовал
+    // другое, и понять это было нельзя никак.
     int16_t shown = trig ? c.stepVal[k][i]
                          : modParam(state.currentSlot, state.subPage, i);
     // Смещение этой колонки прямо сейчас — по нему рисуется индикатор.
@@ -4408,14 +4302,7 @@ void drawSlotPage() {
       if (c.outCh[o] == 0) strcpy(label, "NO");
       else sprintf(label, "CH%d", c.outCh[o]);
       sprintf(val, "%+d", clampInt(c.outXp[o], -14, 14));
-    } else if (!state.subPage && (AppId)c.app == AppId::META && i >= 1) {
-      // Сверху слот-цель (под TAP), снизу имя её параметра.
-      int16_t a = c.p[i];
-      uint8_t ts = metaTgtSlot(a);
-      PDesc td = metaParamDesc(ts, metaTgtIdx(a));
-      sprintf(label, "%c", (char)('A' + ts));
-      strncpy(val, td.name[0] ? td.name : "--", sizeof(val) - 1);
-      val[sizeof(val) - 1] = 0;
+
     } else if (!state.subPage && (AppId)c.app == AppId::KEYTRK) {
       // Колонка = линия CC: сверху её номер (TAP + энкодер), снизу
       // глубина. Выключенную линию помечаем прочерком вместо номера —
@@ -4562,10 +4449,6 @@ void loadSettings() {
     c.ccDest = (uint8_t)clampInt(c.ccDest, 0, 127);
     c.stepPlus = (int8_t)clampInt(c.stepPlus, -12, 12);
     for (uint8_t i = 0; i < NUM_COLS; i++) c.ktCC[i] = (uint8_t)clampInt(c.ktCC[i], 0, 127);
-    for (uint8_t i = 0; i < 3; i++) c.metaDepth[i] = (int8_t)clampInt(c.metaDepth[i], -64, 64);
-    if ((AppId)c.app == AppId::META)
-      for (uint8_t i = 1; i < NUM_COLS; i++)
-        if (metaTgtSlot(c.p[i]) == s) c.p[i] = metaNextAddr(s, c.p[i], 1);
     for (uint8_t i = 0; i < 8; i++) {
       c.outCh[i] = (uint8_t)clampInt(c.outCh[i], 0, 16);
       c.outXp[i] = (int8_t)clampInt(c.outXp[i], -14, 14);
@@ -4576,8 +4459,14 @@ void loadSettings() {
       c.sub3 = (int16_t)clampInt(c.sub3, d3.lo, d3.hi);
     }
     for (uint8_t i = 0; i < 2 * NUM_COLS; i++) {
-      c.modCC[i] = (uint8_t)clampInt(c.modCC[i], 0, 127);
-      c.modDepth[i] = (int8_t)clampInt(c.modDepth[i], -64, 64);
+      c.modSrc[i] = (uint8_t)clampInt(c.modSrc[i], MOD_NO, MOD_EXT);
+      // Глубина ограничивается пределом СВОЕЙ колонки: у короткого
+      // параметра это число позиций, а не сотня.
+      {
+        PDesc dm = columnDesc(s, i >= NUM_COLS, (uint8_t)(i % NUM_COLS));
+        int lim = dm.name[0] ? modDepthLimit(dm) : 0;
+        c.modDepth[i] = (int8_t)clampInt(c.modDepth[i], -lim, lim);
+      }
     }
     c.rate = (uint8_t)clampInt(c.rate, 0, 4);
     c.scale = (uint8_t)clampInt(c.scale, 0, 9);
@@ -4609,7 +4498,7 @@ void loadSettings() {
 // через 2 секунды после правки, патчи — только вручную. Иначе одна
 // неосторожная правка затирала бы сохранённое.
 constexpr uint16_t PATCH_MAGIC = 0x4348;   // 'CH'
-constexpr uint8_t  PATCH_VER   = 3;   // 2: удалён SIEVE; 3: карта модуляции в SlotCfg
+constexpr uint8_t  PATCH_VER   = 4;   // 2: без SIEVE; 3: карта модуляции; 4: без META
 
 struct Patch {
   uint16_t magic;

@@ -8,7 +8,7 @@ int main() {
     "EMPTY", "BASIC", "SKELETON", "EUCLIDIAN", "TOPOLOGY",
     "ARPEGGIO", "STRUM", "NOTE DELAY", "ENVELOPE", "MORPH LFO",
     "DUST", "GLIDER", "ADD", "SHIFT", "LOGIC", "MATH",
-    "KEYTRACK", "MULTI OUT", "POLY SPLIT", "ROUND ROBIN", "META",
+    "KEYTRACK", "MULTI OUT", "POLY SPLIT", "ROUND ROBIN",
   };
   ck("число приложений", APP_COUNT, (int)(sizeof(want) / sizeof(*want)));
   int bad = 0;
@@ -51,19 +51,6 @@ int main() {
   }
   ck("у всех модулей есть иконка", blank, 0);
 
-  int clash = 0;
-  for (uint8_t a = 1; a < APP_COUNT; a++) {
-    reset();
-    loadApp(0, a);
-    std::vector<std::string> n;
-    for (uint8_t i = 0; i < MP_COUNT; i++) {
-      PDesc d = metaParamDesc(0, i);
-      if (d.name[0]) n.push_back(d.name);
-    }
-    std::set<std::string> u(n.begin(), n.end());
-    if (u.size() != n.size()) { printf("  у %s повторяются имена целей\n", apps[a].name); clash++; }
-  }
-  ck("имена целей META уникальны внутри модуля", clash, 0);
 
   printf("\n=== Размеры ===\n");
   printf("  SlotCfg=%zu  патч=%zu  8 ячеек=%zu байт  PATCH_VER=%d\n",
@@ -99,9 +86,8 @@ int main() {
     }
     if (g_midi.empty()) { printf("  %s молчит со значениями по умолчанию\n", apps[a].name); silent++; }
   }
-  // META модулирует, наружу не шлёт ничего — это нормально.
-  printf("  немых модулей: %d (ожидается 1: META)\n", silent);
-  ck("молчит только META", silent, 1);
+  printf("  немых модулей: %d\n", silent);
+  ck("молчащих модулей нет", silent, 0);
 
   return done("STRUCTURE");
 }
