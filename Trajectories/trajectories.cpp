@@ -653,6 +653,40 @@ inline uint8_t extModCC(uint8_t slot, uint8_t idx) {
 // Вести параметр может только модуль с непрерывным выходом — ровно те
 // шесть, что кладут значение в ccValue шины. У генераторов, нотных
 // процессоров и роутеров непрерывного выхода нет, и в списке их не будет.
+// Какие параметры МОЖНО модулировать. Карта проставлена вручную по
+// каждому модулю, а не выведена правилом: правило «запрещено всё, что
+// перекидывает цепочку» описывает только часть, а остальное — решение
+// о том, что осмысленно вести извне, а что ломает модуль.
+// Бит i — колонка i главной страницы, бит 4+i — колонка i подстраницы.
+// Индексируется AppId, порядок тот же, что в enum.
+// Запрещено, в частности, везде: CH, ARM, CCDST, STEP+, лад и тоника.
+// LOGIC и MULTI OUT закрыты целиком — у них нет ни одного параметра,
+// который имеет смысл вести со стороны.
+const uint8_t modAllow[APP_COUNT] = {
+  0x00,   // EMPTY
+  0x88,   // BASIC       TRIG, STEPS
+  0x80,   // SKELETON    STEPS
+  0x0F,   // EUCLIDIAN   STEPS, PULSE, ROTAT, NOTE
+  0x81,   // TOPOLOGY    XY, CHAOS
+  0x0D,   // ARPEGGIO    RATE, OCT, STUTT
+  0x43,   // STRUM       SPEED, VOICE, ACCNT
+  0x0D,   // NOTE DELAY  RPEAT, PPONG, DECAY
+  0x40,   // ENVELOPE    SPEED
+  0x0E,   // MORPH LFO   MORPH, ACTIV, AMT
+  0x0F,   // DUST        FILL, ROOT%, PLEN, REACH
+  0x0B,   // GLIDER      SPEED, STEPS, GATE%
+  0x09,   // ADD         INTV, VEL
+  0x00,   // LOGIC
+  0x40,   // KEYTRACK    CENTR
+  0x00,   // MULTI OUT
+  0x01,   // POLY SPLIT  POINT
+  0x09,   // ROUND ROBIN VOICE, SPRD
+};
+inline bool modAllowed(uint8_t app, bool sub, uint8_t col) {
+  if (app >= APP_COUNT || col >= NUM_COLS) return false;
+  return modAllow[app] & (uint8_t)(1u << (col + (sub ? NUM_COLS : 0)));
+}
+
 inline bool isModSource(uint8_t app) {
   switch ((AppId)app) {
     case AppId::MLFO: case AppId::ENV: case AppId::KEYTRK:
@@ -2422,6 +2456,10 @@ void serviceSlots() {
       bool sub = (i >= NUM_COLS);
       PDesc d = columnDesc(s, sub, (uint8_t)(i % NUM_COLS));
       if (!d.name[0]) continue;
+      // Проверяем и здесь, а не только на вводе: привязка могла
+      // остаться во флеше от прошлой версии карты или от другого
+      // приложения в этом слоте.
+      if (!modAllowed(cfg[s].app, sub, (uint8_t)(i % NUM_COLS))) continue;
       int cc;
       bool bipolar;
       if (src == MOD_EXT) {
@@ -3237,7 +3275,10 @@ void handleEncoder() {
   if (state.modLayer && c.app != (uint8_t)AppId::EMPTY) {
     uint8_t mi = (uint8_t)((state.subPage ? NUM_COLS : 0) + col);
     PDesc dm = columnDesc(state.currentSlot, state.subPage, col);
-    if (dm.name[0]) {
+    // Часть параметров модулировать нельзя — карта modAllow. Крутить
+    // такую колонку в слое бессмысленно: привязка всё равно не
+    // применится, а на экране осталась бы.
+    if (dm.name[0] && modAllowed(c.app, state.subPage, col)) {
       if (buttons[1].lastStable == LOW) {
         int lim = modDepthLimit(dm);
         c.modDepth[mi] = (int8_t)clampInt(c.modDepth[mi] + steps, -lim, lim);
@@ -4005,6 +4046,19 @@ void drawSlotPage() {
       char lb[8], vb[8];
       uint8_t mi = (uint8_t)((state.subPage ? NUM_COLS : 0) + i);
       uint8_t src = c.modSrc[mi];
+      // Параметр, который модулировать нельзя, показан прочерком и
+      // своим именем: «NO» означало бы «пока не привязан», то есть
+      // предлагало бы крутить колонку, которая не поддастся.
+      if (!modAllowed(c.app, state.subPage, i)) {
+        display.setTextSize(1);
+        printCentered(x, Display::COL_W, Display::COL_Y + 2, d.name, SSD1306_WHITE);
+        // Перечёркнутая колонка: две штриховые линии вместо значения.
+        for (uint8_t gx = (uint8_t)(x + 6); gx < x + Display::COL_W - 6; gx += 3)
+          display.drawPixel(gx, Display::COL_Y + Display::COL_H - 6, SSD1306_WHITE);
+        if (state.selectedCol == i)
+          drawCornerCursor(x, Display::COL_Y, Display::COL_W, Display::COL_H, SSD1306_WHITE);
+        continue;
+      }
       if (src == MOD_NO) { strcpy(lb, "NO"); vb[0] = 0; }
       else {
         // У EXT сразу показан номер контроллера, который надо слать:

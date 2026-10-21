@@ -24,18 +24,20 @@ int main() {
   cfg[1].arm = 0; cfg[1].running = true; cfg[1].midiCh = 0;   // наружу молчит
   cfg[1].ccDest = 50; cfg[1].p[3] = 127; cfg[1].sub4 = 2;
   loadApp(2, (uint8_t)AppId::TOPOLOGY);              // C: цель
-  cfg[2].running = true; cfg[2].p[1] = 64;
-  bind(2, false, 1, 2, +100);                        // плотность ведёт слот B
+  cfg[2].running = true; cfg[2].sub4 = 64;
+  // Ведём CHAOS — один из двух параметров TOPOLOGY, которые по карте
+  // modAllow разрешено модулировать. Плотности дорожек запрещены.
+  bind(2, true, 3, 2, +100);
   int lo = 999, hi = -999;
   for (int t = 0; t < 3000; t++) {
     onClockTick(); serviceSlots(); serviceScheduler();
     g_ms += 2; g_us += 2000; state.midiTicks++;
-    int v = modP(2, 1);
+    int v = modSub4(2);
     if (v < lo) lo = v; if (v > hi) hi = v;
   }
-  printf("  плотность C: %d..%d (хранится %d)\n", lo, hi, (int)cfg[2].p[1]);
+  printf("  CHAOS C: %d..%d (хранится %d)\n", lo, hi, (int)cfg[2].sub4);
   ck("источник реально ведёт", hi - lo > 40, 1);
-  ck("хранимое не испорчено", cfg[2].p[1], 64);
+  ck("хранимое не испорчено", cfg[2].sub4, 64);
 
   printf("\n=== 2. Байпас источника снимает модуляцию ===\n");
   cfg[1].bypass = true;
