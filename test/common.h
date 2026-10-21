@@ -44,6 +44,19 @@ inline std::vector<int> noteList() {
 inline void pr(const char *t, const std::vector<int> &v) {
   printf("  %-26s", t); for (int x : v) printf("%d ", x); printf("\n");
 }
+extern int g_pin[64];
+
+// Кнопки через НАСТОЯЩИЙ updateButtons(): меняем пин и прокручиваем
+// время, чтобы отработал дебаунс. Так проверяется тот код, который
+// реально исполняется на плате.
+inline void pump(uint32_t ms) {
+  for (uint32_t t = 0; t < ms; t += 5) { g_ms += 5; g_us += 5000; updateButtons(); }
+}
+inline void hold(uint8_t pin, uint32_t ms) {
+  g_pin[pin] = LOW;  pump(ms);
+  g_pin[pin] = HIGH; pump(60);
+}
+
 // Чистый старт: пустые слоты, пустой планировщик, известное время.
 inline void reset() {
   flushScheduler();
@@ -59,4 +72,9 @@ inline void reset() {
   }
   g_midi.clear();
   g_ms = 100000;
+  for (int i = 0; i < 64; i++) g_pin[i] = HIGH;
+  for (uint8_t i = 0; i < 4; i++) { buttons[i].raw = HIGH; buttons[i].lastStable = HIGH;
+                                    buttons[i].lastChange = 0; buttons[i].processed = false; }
+  state.modLayer = false; state.patchOpen = false; state.appListOpen = false;
+  state.encSWPressAt = 0; state.encSWRotated = false; state.encSWLastPress = 0;
 }

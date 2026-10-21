@@ -13,7 +13,13 @@ unsigned long millis() { return g_ms; }
 unsigned long micros() { return g_us; }
 void delay(unsigned long) {}
 void pinMode(uint8_t, uint8_t) {}
-int  digitalRead(uint8_t) { return HIGH; }
+// Состояние пинов: без него digitalRead всегда возвращал HIGH, и
+// настоящий updateButtons() был непроверяем — жесты приходилось
+// повторять копией логики в тесте, а такой тест не поймал даже того,
+// что ветка жеста в прошивку не попала.
+int g_pin[64];
+struct PinInit { PinInit() { for (int i = 0; i < 64; i++) g_pin[i] = HIGH; } } g_pinInit;
+int  digitalRead(uint8_t p) { return p < 64 ? g_pin[p] : HIGH; }
 int  analogRead(uint8_t) { return 7; }
 void randomSeed(unsigned long) {}
 long random(long h) { return h > 0 ? (long)(rand() % h) : 0; }

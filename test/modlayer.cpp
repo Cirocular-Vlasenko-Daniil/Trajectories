@@ -64,21 +64,47 @@ int main() {
   printf("  LFO с каналом NO ведёт плотность: %d..%d\n", lo, hi);
   ck("внутренний источник работает без MIDI наружу", hi - lo > 40, 1);
 
-  printf("\n=== 4. Жест: удержание ENC_SW без вращения ===\n");
-  state.modLayer = false; state.patchOpen = false; state.appListOpen = false;
-  auto encPress = [&](uint32_t holdMs, bool rotate) {
-    state.encSWPressAt = g_ms; state.encSWRotated = false;
-    g_ms += holdMs;
-    if (rotate) state.encSWRotated = true;
-    // та же ветка, что в обработчике отпускания
-    if (!state.encSWRotated && state.encSWPressAt &&
-        g_ms - state.encSWPressAt >= PLAY_HOLD_MS) state.modLayer = !state.modLayer;
-    state.encSWPressAt = 0;
-  };
-  encPress(100, false);  ck("короткое нажатие слой не включает", state.modLayer, 0);
-  encPress(900, true);   ck("удержание С вращением — это курсор шага", state.modLayer, 0);
-  encPress(900, false);  ck("удержание без вращения включает слой", state.modLayer, 1);
-  encPress(900, false);  ck("и выключает его", state.modLayer, 0);
+  printf("\n=== 4. Жест через НАСТОЯЩИЙ обработчик кнопок ===\n");
+  // Гоняем updateButtons() с реальными пинами и дебаунсом. Прошлая
+  // версия повторяла логику лямбдой в тесте — и не заметила, что ветка
+  // жеста в прошивку вообще не попала: слой был, но недостижим.
+  reset();
+  loadApp(0, (uint8_t)AppId::BASIC);
+  state.currentSlot = 0; state.subPage = false;
+
+  hold(Pins::ENC_SW, 100);
+  ck("короткое нажатие слой не включает", state.modLayer, 0);
+
+  hold(Pins::ENC_SW, PLAY_HOLD_MS + 200);
+  ck("удержание включает слой", state.modLayer, 1);
+
+  hold(Pins::ENC_SW, PLAY_HOLD_MS + 200);
+  ck("повторное удержание выключает", state.modLayer, 0);
+
+  // Удержание С вращением — это курсор шага, слой трогать нельзя.
+  uint8_t before = rt[0].cursor;
+  g_pin[Pins::ENC_SW] = LOW;
+  pump(200);
+  encoderTicks = 4; handleEncoder();          // поворот во время удержания
+  pump(PLAY_HOLD_MS + 200);
+  g_pin[Pins::ENC_SW] = HIGH; pump(60);
+  ck("удержание с вращением слой не включает", state.modLayer, 0);
+  ck("и двигает курсор шага", rt[0].cursor != before, 1);
+
+  // В браузере патчей то же удержание занято сохранением.
+  state.patchOpen = true;
+  hold(Pins::ENC_SW, PLAY_HOLD_MS + 200);
+  ck("в браузере патчей слой не включается", state.modLayer, 0);
+  state.patchOpen = false;
+
+  // И вход, и выход работают, когда слой уже открыт на подстранице.
+  state.subPage = true;
+  hold(Pins::ENC_SW, PLAY_HOLD_MS + 200);
+  ck("на подстранице тоже включается", state.modLayer, 1);
+  hold(Pins::ENC_SW, PLAY_HOLD_MS + 200);
+  ck("и выключается", state.modLayer, 0);
+  state.subPage = false;
+
 
   printf("\n=== 5. Как слой выглядит ===\n");
   reset();

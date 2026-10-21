@@ -3236,6 +3236,18 @@ void updateButtons() {
         }
         state.pageWasPressed = false;
       }
+      else if (i == 3 && !state.patchOpen && !state.appListOpen) {
+        // Слой модуляции. Решение на ОТПУСКАНИИ, как у PLAY и PAGE: до
+        // него неизвестно, короткое это нажатие или удержание. Если за
+        // время удержания энкодер поворачивали — это курсор шага, и
+        // слой не трогаем.
+        if (!state.encSWRotated && state.encSWPressAt &&
+            millis() - state.encSWPressAt >= PLAY_HOLD_MS) {
+          state.modLayer = !state.modLayer;
+          state.displayDirty = true;
+        }
+        state.encSWPressAt = 0;
+      }
       else if (i == 3 && state.patchOpen) {
         // Короткое нажатие грузит; удержание уже сделало своё дело.
         // С зажатым TAP короткое нажатие не грузит ничего: иначе
@@ -3336,6 +3348,9 @@ void updateButtons() {
       continue;
     }
 
+    state.encSWPressAt = now;
+    state.encSWRotated = false;
+
     if (state.encSWLastPress != 0 && now - state.encSWLastPress < DOUBLE_CLICK_TIME) {
       // Сбрасываем метку, чтобы третий клик подряд не читался как
       // ещё один "двойной".
@@ -3423,6 +3438,7 @@ void handleEncoder() {
     uint8_t n = patternLen(state.currentSlot);
     r.cursor = (uint8_t)((r.cursor + steps % n + n) % n);
     state.encSWLastPress = 0;
+    state.encSWRotated = true;   // это курсор, а не вход в слой
     state.displayDirty = true;
     return;
   }
