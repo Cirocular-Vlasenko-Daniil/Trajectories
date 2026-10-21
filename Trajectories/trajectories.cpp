@@ -13,15 +13,6 @@
 #include <Adafruit_SSD1306.h>
 #include <Preferences.h>
 
-// Имя, версия и обложка для ESPidi HUB. Под защитой __has_include,
-// потому что на хосте (прогон тестов из test/) ESP-IDF и ESPidiHub.h
-// отсутствуют, а собираться там прошивка обязана.
-#if __has_include(<ESPidiHub.h>)
-  #include <ESPidiHub.h>
-  ESPIDI_FIRMWARE("trajectories", "Trajectories", "0.1 beta", "Daniil Vlasenko");
-  #include "cover.h"   // из cover.pbm: espidi_hub.py cover --invert cover.pbm > cover.h
-#endif
-
 // ============================================================
 // 1. КОНФИГУРАЦИЯ
 // ============================================================
