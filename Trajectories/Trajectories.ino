@@ -20,5 +20,5 @@
 
 #include <ESPidiHub.h>
 
-ESPIDI_FIRMWARE("trajectories", "Trajectories", "0.3 beta", "Daniil Vlasenko");
+ESPIDI_FIRMWARE("trajectories", "Trajectories", "0.4 beta", "Daniil Vlasenko");
 #include "cover.h"   // генерируется из cover.png: espidi_hub.py repo . --sync-cover
